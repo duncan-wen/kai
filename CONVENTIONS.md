@@ -40,6 +40,7 @@ core/           → 業務邏輯（與 UI 無關）
   backends.py   → stream_ollama / stream_openai_compat
   config.py     → 所有 env-var 常數
   models.py     → ModelProfile dataclass + REGISTRY
+  session_store.py → SessionStore：session 封存／resume／命名（狀態只在磁碟上）
   tools/        → web_search / fetch_urls, bash_exec, dify_retrieve, run_tool
   mcp_client.py → MCP server 生命週期 + 工具呼叫
   tts.py        → TTS 引擎抽象（edge-tts, azure-tts, melotts, kokoro）

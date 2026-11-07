@@ -46,7 +46,7 @@ class StreamingMixin(_MixinBase):
             _my_tab_id = "chat"
         if not ephemeral:
             # 有新訊息代表已脫離 resume 快照
-            self._session_archive(agent).mark_active()
+            self._session_store(agent).mark_active()
         _history_snapshot = [m.copy() for m in agent.history] if ephemeral else None
         self.ui_state.spin_idx = 0
         self.ui_state.spin_label = "等待回覆"

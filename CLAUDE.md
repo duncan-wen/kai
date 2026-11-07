@@ -36,7 +36,7 @@ core/
   agent_factory.py  → /create-agent, /load-agent, /list-agents logic (AI-based agent design)
   backends.py       → stream_ollama / stream_openai_compat (backend-specific streaming)
   app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState)
-  session_archive.py → SessionArchive: /cls, /resume, session naming, archive list/rename/delete (disk-only state)
+  session_store.py  → SessionStore: /cls, /resume, session naming, archive list/rename/delete (disk-only state)
   tools/            → built-in tools: web.py (web_search / fetch_urls), bash.py (bash_exec), dify.py (RAG), dispatch.py (run_tool)
   models.py         → ModelProfile dataclass + REGISTRY
   config.py         → all env-var constants (loaded once at import)
@@ -191,11 +191,11 @@ When changing directory (via `/cd` or `!cd`):
 
 ### Session history (`/cls` and `/resume`)
 
-All archive lifecycle lives in `core/session_archive.py` (`SessionArchive(history_file)`); mixins and `ResumeScreen` only notify and re-render. Terms (Session, Archive, Resumed session) are defined in `GLOSSARY.md`. State is disk-only, next to each history file (main and every agent tab are independent): `.history/history_<ts>[_N].json`, `.names.json`, `.current_name`, `.resumed_from`. Don't mirror it in UI state.
+All archive lifecycle lives in `core/session_store.py` (`SessionStore(history_file)`); mixins and `ResumeScreen` only notify and re-render. Terms (Session, Archive, Resumed session) are defined in `GLOSSARY.md`; UI text uses the noun "archive" and the verb「封存」, not「歸檔」. State is disk-only, next to each history file (main and every agent tab are independent): `.history/history_<ts>[_N].json`, `.names.json`, `.current_name`, `.resumed_from`. Don't mirror it in UI state.
 
 `/cls` → `close()`: archives `history.json` to `.history/history_YYYYMMDD_HHMMSS[_N].json`; a resumed session with no new messages is discarded instead of re-archived. A resumed session whose source archive no longer exists is treated as a normal session (archived, never silently deleted).
 
-`/resume` → `resume(archive)`: closes the current session first (auto-archive if it has new messages), then copies the archive in and marks it resumed. Any non-ephemeral new message — typed by the user (`_send`) or dispatched from another agent (`_dispatch_to_agent`) — must call `mark_active()`, which ends the resumed state and carries the archive's name over.
+`/resume` → `resume(archive)`: closes the current session first (auto-archive if it has new messages), then copies the archive in and marks it resumed. Any non-ephemeral new message — typed by the user (`_send`), saved via `/save`, or dispatched from another agent (`_dispatch_to_agent`) — must call `mark_active()`, which ends the resumed state and carries the archive's name over.
 
 `ResumeScreen` lists archives (timestamp, name, message count, last user message) with inline rename / delete via the same module.
 

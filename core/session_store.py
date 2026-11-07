@@ -55,7 +55,7 @@ def _timestamp_of(archive: Path) -> str:
     return f"{dt[:4]}-{dt[4:6]}-{dt[6:8]} {dt[9:11]}:{dt[11:13]}"
 
 
-class SessionArchive:
+class SessionStore:
     """以一個 history 檔為單位，管理其 session 與 `.history/` 下的 archive。"""
 
     def __init__(self, history_file: Path) -> None:

@@ -278,7 +278,7 @@ class AgentsMixin(_MixinBase):
 
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
         # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
-        self._session_archive(agent).mark_active()
+        self._session_store(agent).mark_active()
         try:
             async with agent._chat_lock:
                 await agent.chat(

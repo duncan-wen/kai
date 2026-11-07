@@ -1,4 +1,4 @@
-"""ResumeScreen — 歸檔 session 選擇器 ModalScreen。"""
+"""ResumeScreen — archive 選擇器 ModalScreen。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,13 +11,13 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList
 from textual.widgets.option_list import Option
 
-from core.session_archive import SessionArchive
+from core.session_store import SessionStore
 
 
 class ResumeScreen(ModalScreen[Path | None]):
     """顯示 archive 清單；選取後 dismiss(archive 路徑)，Escape dismiss(None)。
 
-    讀取、改名、刪除都交給 SessionArchive；這裡只負責顯示。
+    讀取、改名、刪除都交給 SessionStore；這裡只負責顯示。
     """
 
     BINDINGS = [
@@ -60,10 +60,10 @@ class ResumeScreen(ModalScreen[Path | None]):
     }
     """
 
-    def __init__(self, archive: SessionArchive) -> None:
+    def __init__(self, store: SessionStore) -> None:
         super().__init__()
-        self._sa = archive
-        self._entries = archive.list_archives()
+        self._store = store
+        self._entries = store.list_archives()
         self._rename_idx: int | None = None
 
     # ── build ─────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ class ResumeScreen(ModalScreen[Path | None]):
     def _make_option(self, i: int) -> Option:
         e = self._entries[i]
         name = e.name
-        is_current = e.path == self._sa.resumed_from
+        is_current = e.path == self._store.resumed_from
         return Option(
             Text.assemble(
                 ("▶ " if is_current else "  ", "bold green"),
@@ -87,7 +87,7 @@ class ResumeScreen(ModalScreen[Path | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="resume-dialog"):
-            yield Label("📂 歸檔 Session", id="resume-title")
+            yield Label("📂 Archive", id="resume-title")
             yield OptionList(*[self._make_option(i) for i in range(len(self._entries))], id="resume-list")
             yield Input(placeholder="輸入名稱… Enter 確認  Esc 取消", id="rename-input")
             yield Label("[dim]↑↓ 選擇  Enter / 點擊 載入  r 重命名  d 刪除  Esc 關閉[/dim]", id="resume-hint")
@@ -111,10 +111,10 @@ class ResumeScreen(ModalScreen[Path | None]):
             return
         idx = self._rename_idx
         try:
-            self._sa.rename_archive(self._entries[idx].path, event.value.strip())
+            self._store.rename_archive(self._entries[idx].path, event.value.strip())
         except OSError as e:
             self.notify(f"命名失敗：{e}", severity="error")
-        self._entries = self._sa.list_archives()
+        self._entries = self._store.list_archives()
         self._finish_rename(idx)
 
     def action_dismiss_or_cancel(self) -> None:
@@ -144,12 +144,12 @@ class ResumeScreen(ModalScreen[Path | None]):
         if idx is None:
             return
         try:
-            self._sa.delete_archive(self._entries[idx].path)
+            self._store.delete_archive(self._entries[idx].path)
         except OSError as e:
             self.notify(f"刪除失敗：{e}", severity="error")
             return
         # 重新讀取並重建（序號需要重排）
-        self._entries = self._sa.list_archives()
+        self._entries = self._store.list_archives()
         if not self._entries:
             self.dismiss(None)
             return

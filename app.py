@@ -213,7 +213,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             return f"✅ 找到 agent：{dir_name}，正在開啟..."
 
         self.agent.tools_map["open_agent"] = _open_agent_tool
-        # session 名稱與 resume 狀態都在磁碟上（SessionArchive），這裡只需更新標題
+        # session 名稱與 resume 狀態都在磁碟上（SessionStore），這裡只需更新標題
         self._update_subtitle()
         self.query_one("#prompt", HistoryInput).focus()
         self._update_prompt_title()
@@ -222,8 +222,8 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             ("/clear", "清除畫面"),
             ("/ask", "臨時提問，不污染對話歷史  /ask <問題>"),
             ("/save", "將上一次 /ask 的回答存入對話歷史"),
-            ("/cls", "清除記憶並歸檔（可 /resume 恢復）"),
-            ("/resume", "列出歸檔 session  /resume [編號]"),
+            ("/cls", "清除記憶並封存（可 /resume 恢復）"),
+            ("/resume", "列出 archive  /resume [編號]"),
             ("/remember", "記住規則  /remember <內容>"),
             ("/compact", "用 Gemini 壓縮對話歷史（釋放 context）"),
             ("/image", "傳送圖片給模型  /image <路徑> [問題]"),
@@ -509,7 +509,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
                     self.notify("沒有可保存的 /ask 回答", severity="warning")
                 else:
                     # 存入的 /ask 回答算新對話：session 不再是 resumed session
-                    self._session_archive().mark_active()
+                    self._session_store().mark_active()
                     self.agent.history.extend(self.input_state.last_ephemeral)
                     self.agent.save_history()
                     self.input_state.last_ephemeral = None

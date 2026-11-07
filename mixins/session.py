@@ -9,7 +9,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Static, TabbedContent
 
 from core.agent import Agent
-from core.session_archive import SessionArchive
+from core.session_store import SessionStore
 from core.config import _normalize, apply_kai_config, current_kai_config, ensure_kai_dir, get_nickname, load_kai_config, reload_env
 from core.models import REGISTRY
 from widgets.input import HistoryInput
@@ -117,32 +117,32 @@ class SessionMixin(_MixinBase):
 
     # ── session 命名 ──────────────────────────────────────────────────────────
 
-    def _session_archive(self, agent: Agent | None = None) -> SessionArchive:
+    def _session_store(self, agent: Agent | None = None) -> SessionStore:
         """目前（或指定）agent 的 session archive。
 
         每次依 history 檔路徑重建：狀態都在磁碟上，/cd 後自然對到新目錄。
         """
-        return SessionArchive((agent or self.agent)._history_file)
+        return SessionStore((agent or self.agent)._history_file)
 
     def _update_subtitle(self) -> None:
         display = self.agent.display_name
-        name = self._session_archive().name
+        name = self._session_store().name
         self.sub_title = f"{display} · {name}" if name else display
 
     def _do_rename(self, arg: str) -> None:
-        sa = self._session_archive()
+        store = self._session_store()
         if not arg:
-            shown = sa.name or "（未命名）"
+            shown = store.name or "（未命名）"
             self.notify(f"目前 session 名稱：{shown}\n用法：/rename <名稱>", timeout=5)
             return
-        to_archive = sa.resumed_from is not None
+        to_archive = store.resumed_from is not None
         try:
-            sa.rename(arg)
+            store.rename(arg)
         except OSError as e:
             self.notify(f"命名失敗：{e}", severity="error")
             return
         self._update_subtitle()
-        hint = "已同步更新來源 archive" if to_archive else "歸檔時自動儲存"
+        hint = "已同步更新來源 archive" if to_archive else "封存時自動儲存"
         self.notify(f"Session 命名為「{arg}」，{hint}", timeout=3)
 
     # ── /cls ─────────────────────────────────────────────────────────────────
@@ -157,15 +157,15 @@ class SessionMixin(_MixinBase):
             return
         agent.save_history()  # 確保磁碟與記憶體一致後再封存
         try:
-            result = self._session_archive(agent).close()
+            result = self._session_store(agent).close()
         except OSError as e:
-            self.notify(f"歸檔失敗：{e}", severity="error")
+            self.notify(f"封存失敗：{e}", severity="error")
             return
         await msgs.remove_children()
         if result.kind == "archived" and result.archive is not None:
-            self.notify(f"歷史已歸檔至 .history/{result.archive.name}", timeout=3)
+            self.notify(f"已封存至 .history/{result.archive.name}", timeout=3)
         elif result.kind == "discarded":
-            self.notify("已清除（resume 後未新增對話，不重複歸檔）", timeout=3)
+            self.notify("已清除（resume 後未新增對話，不重複封存）", timeout=3)
         agent.history = []
         agent._rebuild_system_prompt()
         agent.save_history()
@@ -178,10 +178,10 @@ class SessionMixin(_MixinBase):
 
     async def _handle_resume(self, arg: str) -> None:
         from widgets.resume import ResumeScreen
-        sa = self._session_archive()
-        entries = sa.list_archives()
+        store = self._session_store()
+        entries = store.list_archives()
         if not entries:
-            self.notify("沒有任何歸檔 session", severity="warning")
+            self.notify("沒有任何 archive", severity="warning")
             return
         if arg:
             try:
@@ -190,7 +190,7 @@ class SessionMixin(_MixinBase):
                     raise IndexError
                 archive = entries[idx].path
             except (ValueError, IndexError):
-                self.notify(f"編號無效，共 {len(entries)} 個歸檔", severity="error")
+                self.notify(f"編號無效，共 {len(entries)} 個 archive", severity="error")
                 return
             await self._resume_load(archive)
             return
@@ -199,27 +199,27 @@ class SessionMixin(_MixinBase):
             if archive is not None:
                 await self._resume_load(archive)
 
-        self.push_screen(ResumeScreen(sa), _on_result)
+        self.push_screen(ResumeScreen(store), _on_result)
 
     async def _resume_load(self, archive: Path) -> None:
         agent = self.agent
-        sa = self._session_archive(agent)
+        store = self._session_store(agent)
         agent.save_history()  # 確保磁碟與記憶體一致後再切換
         try:
-            result = sa.resume(archive)
+            result = store.resume(archive)
         except OSError as e:
             self.notify(f"載入失敗：{e}", severity="error")
             return
         if result.kind == "archived" and result.archive is not None:
-            self.notify(f"已自動歸檔：{result.archive.name}", timeout=3)
+            self.notify(f"已自動封存：{result.archive.name}", timeout=3)
         msgs = self._active_msgs()
         await msgs.remove_children()
         agent.reset_history()
         await self._render_history_into(msgs, agent)
         self.agent = agent
         self._update_subtitle()
-        name_display = sa.name or archive.name
-        self.notify(f"已載入：{name_display}（有新對話後才會重新歸檔）", timeout=4)
+        name_display = store.name or archive.name
+        self.notify(f"已載入：{name_display}（有新對話後才會重新封存）", timeout=4)
 
     async def action_switch_model(self, model_name: str) -> None:
         if model_name not in REGISTRY:

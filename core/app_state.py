@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class SessionState:
-    """目錄導航狀態。session 名稱與 resume 狀態在磁碟上，見 core.session_archive。"""
+    """目錄導航狀態。session 名稱與 resume 狀態在磁碟上，見 core.session_store。"""
 
     prev_cwd: str = ""
 
