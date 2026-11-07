@@ -34,8 +34,9 @@ app.py              → Textual TUI; ChatApp composes all mixins
 core/
   agent.py          → Agent class: history, streaming, tool-call loop
   agent_factory.py  → /create-agent, /load-agent, /list-agents logic (AI-based agent design)
+  agent_registry.py → AgentRegistry: sole owner of main agent + agent tabs (tab ids, active agent, name lookup, MCP distribution); ChatApp.agent = agents.active
   backends.py       → stream_ollama / stream_openai_compat (backend-specific streaming)
-  app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState)
+  app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState); agent tabs live in AgentRegistry, not here
   session_store.py  → SessionStore: /cls, /resume, session naming, archive list/rename/delete (disk-only state)
   tools/            → built-in tools: web.py (web_search / fetch_urls), bash.py (bash_exec), dify.py (RAG), dispatch.py (run_tool)
   models.py         → ModelProfile dataclass + REGISTRY

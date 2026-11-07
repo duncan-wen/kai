@@ -27,6 +27,7 @@ from textual.widgets import (
 )
 
 from core.agent import Agent
+from core.agent_registry import AgentRegistry
 from core.app_state import InputState, SessionState, TabState, UIState
 import core.config as _kai_cfg
 from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
@@ -148,7 +149,8 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             MarkdownTableCellContents.with_tooltip = lambda self, *a, **kw: self  # noqa: ARG005
         except Exception:
             pass
-        self.agent = Agent(model=_kai_cfg.MODEL)
+        # main agent 與所有 agent tab 的唯一 owner；self.agent 是 self.agents.active 的捷徑
+        self.agents = AgentRegistry(Agent(model=_kai_cfg.MODEL))
         self._inject_app_tools(self.agent)
         self.scroll_sensitivity_y = 5.0
         self._at_mention_re = re.compile(r'(?:(?<=\s)|^)@(\S+)')
@@ -195,7 +197,6 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
     def on_mount(self) -> None:
         self.title = "kai"
         self.sub_title = _kai_cfg.MODEL
-        self.tab_state.main_agent = self.agent  # 記住主 chat agent，切回 chat tab 時還原
         # 讓主 chat AI 能呼叫 open_agent 工具開啟副 agent tab
         _app = self
 
@@ -212,7 +213,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             _app.tab_state.pending_open_agent = dir_name
             return f"✅ 找到 agent：{dir_name}，正在開啟..."
 
-        self.agent.tools_map["open_agent"] = _open_agent_tool
+        self.agents.main.tools_map["open_agent"] = _open_agent_tool
         # session 名稱與 resume 狀態都在磁碟上（SessionStore），這裡只需更新標題
         self._update_subtitle()
         self.query_one("#prompt", HistoryInput).focus()
@@ -341,13 +342,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             ]
             if fs_paths:
                 ctx += f"\n檔案系統可存取目錄：{', '.join(fs_paths)}"
-            self.agent.mcp_client = mcp
-            self.agent.mcp_context = ctx
-            self.agent._rebuild_system_prompt()
-            for _a in self.tab_state.agent_tabs.values():
-                _a.mcp_client = mcp
-                _a.mcp_context = ctx
-                _a._rebuild_system_prompt()
+            self.agents.set_mcp(mcp, ctx)
             sidebar.set_mcp(mcp.server_summary)
             logger.info(f"MCP 初始化完成：{mcp.tool_names}")
             assert self._mcp_done
@@ -355,9 +350,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         except asyncio.CancelledError:
             pass
         finally:
-            self.agent.mcp_client = None
-            for _a in self.tab_state.agent_tabs.values():
-                _a.mcp_client = None
+            self.agents.set_mcp(None, "")
             await mcp.stop()
 
     async def action_quit(self) -> None:
@@ -812,42 +805,30 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             await self._maybe_close_tab(tab_id)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """切換到 agent tab 時 swap self.agent，回到 chat tab 時還原。"""
-        # event.tab.id 是 Textual 內部格式 "--content-tab-{pane_id}"，要用 event.pane.id
-        pane = event.pane
-        tab_id = pane.id if pane else None
-        if not tab_id:
-            return
+        """切換到 agent tab（或 chat tab）時把它設為作用中的 Agent。
+
+        讀 tc.active 而不是 event.pane.id：晚到的過時事件也只會套用畫面上真正的 tab。
+        檔案 tab 不改變作用中的 Agent。
+        """
+        tab_id = self.query_one("#center-tabs", TabbedContent).active
+        if tab_id and self.agents.activate(tab_id):
+            self._sync_active_agent_ui()
+
+    def _switch_to_tab(self, tab_id: str) -> None:
+        """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
+        self.query_one("#center-tabs", TabbedContent).active = tab_id
+        if self.agents.activate(tab_id):
+            self._sync_active_agent_ui()
+
+    def _sync_active_agent_ui(self) -> None:
+        """把作用中 Agent 的模型、MCP、暱稱同步到 sidebar／prompt／subtitle／cap-bar。"""
         sidebar = self.query_one("#sidebar", Sidebar)
-        if tab_id in self.tab_state.agent_tabs:
-            self.agent = self.tab_state.agent_tabs[tab_id]
-            prompt = self.query_one("#prompt", HistoryInput)
-            prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
-            sidebar.set_model(self.agent.profile.name)
-            mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
-            sidebar.set_mcp(mcp_sum)
-            self._update_subtitle()
-            self._sync_cap_bar()
-        elif tab_id == "chat":
-            if self.tab_state.main_agent is not None:
-                self.agent = self.tab_state.main_agent
-                prompt = self.query_one("#prompt", HistoryInput)
-                prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
-                sidebar.set_model(self.agent.profile.name)
-                mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
-                sidebar.set_mcp(mcp_sum)
-                self._update_subtitle()
-                self._sync_cap_bar()
-        # 根據新 tab 是否正在串流，恢復或保持 prompt 鎖定狀態
         prompt = self.query_one("#prompt", HistoryInput)
-        if tab_id in self.tab_state.streaming_tabs:
-            prompt.disabled = True
-            prompt.add_class("streaming")
-        else:
-            prompt.disabled = False
-            prompt.remove_class("streaming")
-            self._update_prompt_title()
-            prompt.focus()
+        prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
+        sidebar.set_model(self.agent.profile.name)
+        sidebar.set_mcp(self.agent.mcp_client.server_summary if self.agent.mcp_client else {})
+        self._update_subtitle()
+        self._sync_cap_bar()
 
     def on_file_tree_file_chosen(self, event: FileTree.FileChosen) -> None:
         path = event.path
@@ -956,7 +937,8 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         except Exception:
             pass
         self._open_file_tabs.pop(tab_id, None)
-        self.tab_state.agent_tabs.pop(tab_id, None)
+        if self.agents.get(tab_id) is not None and tab_id != AgentRegistry.MAIN_ID:
+            self.agents.remove(tab_id)
         await self.query_one("#center-tabs", TabbedContent).remove_pane(tab_id)
 
     def action_toggle_sidebar(self) -> None:
@@ -965,26 +947,19 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         self.query_one("#sidebar-handle", ResizeHandle).display = sidebar.display
 
     def _active_msgs(self) -> VerticalScroll:
-        """回傳目前 agent 對應的訊息容器。
-        以 self.agent 為主索引：避免 tc.active 與 self.agent 因非同步事件不同步時
-        把 subagent 的回覆送到 main chat。
-        """
-        # subagent：直接找對應 tab 的 VerticalScroll
-        for tab_id, agent in self.tab_state.agent_tabs.items():
-            if agent is self.agent:
-                try:
-                    return self.query_one(f"TabPane#{tab_id}", TabPane).query_one(VerticalScroll)
-                except Exception:
-                    break
-        # main agent 或找不到 agent tab：用 tc.active 決定
-        tc = self.query_one("#center-tabs", TabbedContent)
-        active = tc.active
-        if active == "chat" or active not in self.tab_state.agent_tabs:
+        """回傳作用中 Agent 對應的訊息容器。"""
+        tab_id = self.agents.active_id
+        if tab_id == AgentRegistry.MAIN_ID:
             return self.query_one("#messages", VerticalScroll)
         try:
-            return self.query_one(f"TabPane#{active}", TabPane).query_one(VerticalScroll)
+            return self.query_one(f"TabPane#{tab_id}", TabPane).query_one(VerticalScroll)
         except Exception:
             return self.query_one("#messages", VerticalScroll)
+
+    @property
+    def agent(self) -> Agent:
+        """作用中的 Agent（由 self.agents 決定）。"""
+        return self.agents.active
 
     def action_cancel_stream(self) -> None:
         from textual.screen import ModalScreen

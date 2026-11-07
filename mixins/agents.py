@@ -71,13 +71,8 @@ class AgentsMixin(_MixinBase):
             prompt.focus()
 
     def _apply_definition(self, agent: "Agent", defn: "AgentDefinition") -> list[str]:
-        """套用 definition；需要 MCP 但還沒有 client 時共用 main agent 的。回傳變更清單。"""
+        """套用 definition 並顯示警告（例如未知模型）。回傳變更清單。"""
         changes = agent.apply_definition(defn)
-        main = self.tab_state.main_agent
-        if agent.mcp_enabled and agent.mcp_client is None and main is not None:
-            agent.mcp_client = main.mcp_client
-            agent.mcp_context = main.mcp_context
-            agent._rebuild_system_prompt()
         for c in changes:
             if c.startswith("⚠️"):
                 self.notify(c, severity="warning")
@@ -96,29 +91,22 @@ class AgentsMixin(_MixinBase):
             self.notify(f"載入 agent 失敗：{e}", severity="error")
             return
         # 已開啟同一個 agent dir → 切換過去，不重複建 tab
-        for tab_id, existing in list(self.tab_state.agent_tabs.items()):
-            if getattr(existing, "_agent_dir", None) == adir:
-                tc = self.query_one("#center-tabs", TabbedContent)
-                tc.active = tab_id
-                self.agent = existing
-                self.notify(f"{defn.display_name} 已開啟，切換過去", timeout=2)
-                return
+        existing_id = self.agents.find_by_dir(adir)
+        if existing_id:
+            self._switch_to_tab(existing_id)
+            self.notify(f"{defn.display_name} 已開啟，切換過去", timeout=2)
+            return
         agent = Agent(
             model=self.agent.profile.name,
             history_file=adir / "history.json",
             agent_dir=adir,
         )
         self._apply_definition(agent, defn)
-        nickname = defn.display_name
-        tab_idx = len(self.tab_state.agent_tabs)
-        tab_id = f"agent-{tab_idx}"
-        scroll = VerticalScroll(id=f"msgs-agent-{tab_idx}")
-        pane = TabPane(f"🤖 {nickname} ×", scroll, id=tab_id)
-        tc = self.query_one("#center-tabs", TabbedContent)
-        await tc.add_pane(pane)
-        self.tab_state.agent_tabs[tab_id] = agent
-        tc.active = tab_id
-        self.agent = agent
+        tab_id = self.agents.add(agent)  # 配 tab id，並接上目前的 MCP
+        scroll = VerticalScroll(id=f"msgs-{tab_id}")
+        pane = TabPane(f"🤖 {defn.display_name} ×", scroll, id=tab_id)
+        await self.query_one("#center-tabs", TabbedContent).add_pane(pane)
+        self._switch_to_tab(tab_id)
         await self._render_history_into(scroll, agent)
         self.notify(f"✅ 已開啟 agent：{defn.name}", timeout=3)
         self._inject_interagent_tools(agent)
@@ -143,29 +131,21 @@ class AgentsMixin(_MixinBase):
         from loguru import logger
         from mixins.streaming import SPINNER
 
-        q = target.strip().lower()
-        main = self.tab_state.main_agent
-        agent: "Agent | None" = None
-        scroll_id: str = ""
-        target_tab_id: str = ""
-
-        if main and q in ("main", "chat", main.display_name.lower()):
-            agent = main
-            scroll_id = "#messages"
-            target_tab_id = "chat"
-        else:
-            for tab_id, ag in self.tab_state.agent_tabs.items():
-                nick = (ag.nickname or "").lower()
-                dir_name = (ag._agent_dir.name if ag._agent_dir else "").lower()
-                if q in nick or nick in q or q in dir_name or dir_name in q:
-                    agent = ag
-                    scroll_id = f"#msgs-{tab_id}"
-                    target_tab_id = tab_id
-                    break
-
+        # target 通常是 send_to_agent 給的 tab id；其他來源則依名稱查找
+        from core.agent_registry import AgentRegistry
+        target_tab_id = target if self.agents.get(target) is not None else ""
+        if not target_tab_id:
+            try:
+                target_tab_id = self.agents.find(target)
+            except LookupError as e:
+                logger.warning(f"[inbox] dispatch: {e}")
+                return
+        agent = self.agents.get(target_tab_id)
         if agent is None:
-            logger.warning(f"[inbox] dispatch: 找不到 target='{target}'，已開啟：{[a.display_name for a in self.tab_state.agent_tabs.values()]}")
+            logger.warning(f"[inbox] dispatch: 目標 tab 已關閉：{target_tab_id}")
             return
+        is_main_target = target_tab_id == AgentRegistry.MAIN_ID
+        scroll_id = "#messages" if is_main_target else f"#msgs-{target_tab_id}"
 
         try:
             scroll = self.query_one(scroll_id, VerticalScroll)
@@ -258,12 +238,10 @@ class AgentsMixin(_MixinBase):
             ))
             scroll.scroll_end(animate=False)
 
-        is_main_target = (agent is self.tab_state.main_agent)
         if is_main_target:
             full_content = content
         else:
-            main = self.tab_state.main_agent
-            reply_to = "main" if (main and sender == main.display_name) else sender
+            reply_to = "main" if sender == self.agents.main.display_name else sender
             full_content = content + f"\n\n[系統]完成後必須呼叫 send_to_agent(\"{reply_to}\", 結果摘要) 回報。"
 
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
@@ -374,6 +352,7 @@ class AgentsMixin(_MixinBase):
             return
 
         changes = self._apply_definition(self.agent, defn)
+        self.agents.attach_mcp(self.agent)  # mcp_servers 可能改了
         # 以磁碟為準重載 history（不呼叫 save_history，避免覆寫使用者手動編輯）
         self.agent.reset_history()
         name = defn.display_name

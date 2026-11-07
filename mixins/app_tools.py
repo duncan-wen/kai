@@ -153,17 +153,12 @@ class AppToolsMixin(_MixinBase):
     # ── callbacks ─────────────────────────────────────────────────────────────
 
     async def _app_list_open_agents(self) -> str:
-        from textual.widgets import TabbedContent
-        tabs = self.tab_state.agent_tabs
+        tabs = self.agents.tabs()
         if not tabs:
             return "目前沒有任何已開啟的 agent tab。"
-        try:
-            tc = self.query_one("#center-tabs", TabbedContent)
-            active_tab = tc.active
-        except Exception:
-            active_tab = None
+        active_tab = self.agents.active_id
         lines = ["目前已開啟的 agent tab："]
-        for tab_id, agent in tabs.items():
+        for tab_id, agent in tabs:
             name = agent.display_name
             active_mark = "（目前聚焦）" if tab_id == active_tab else ""
             lines.append(f"- {name}  [tab_id: {tab_id}]{active_mark}")
@@ -233,19 +228,15 @@ class AppToolsMixin(_MixinBase):
 
     async def _app_load_agent(self, name: str) -> str:
         from core.agent_factory import find_agent
-        from textual.widgets import TabbedContent
-        # 若已開啟，直接切換 tab
-        q = name.lower()
-        for tab_id, agent in self.tab_state.agent_tabs.items():
-            dn = agent.display_name.lower()
-            nick = (agent.nickname or "").lower()
-            if q == dn or q == nick or q in dn or (nick and q in nick):
-                try:
-                    tc = self.query_one("#center-tabs", TabbedContent)
-                    tc.active = tab_id
-                except Exception:
-                    pass
-                return f"✅ {agent.display_name} 已開啟中，已切換過去。"
+        from core.agent_registry import AgentRegistry
+        # 若已開啟，直接切換 tab（有歧義時交給 find_agent 從磁碟找）
+        try:
+            tab_id = self.agents.find(name)
+        except LookupError:
+            tab_id = None
+        if tab_id and tab_id != AgentRegistry.MAIN_ID:
+            self._switch_to_tab(tab_id)
+            return f"✅ {self.agents.get(tab_id).display_name} 已開啟中，已切換過去。"
         resolved = find_agent(name)
         if not resolved:
             return f"找不到 agent：{name}，可用 list_agents 查詢所有可用 agent。"
@@ -256,23 +247,26 @@ class AppToolsMixin(_MixinBase):
             return f"開啟失敗：{e}"
 
     async def _app_close_agent(self, name: str = "") -> str:
+        from core.agent_registry import AgentRegistry
+        tabs = self.agents.tabs()
         if not name:
-            if not self.tab_state.agent_tabs:
+            if not tabs:
                 return "目前沒有開啟中的 agent tab"
-            if len(self.tab_state.agent_tabs) == 1:
-                tab_id, ag = next(iter(self.tab_state.agent_tabs.items()))
-                agent_name = ag.display_name
+            if len(tabs) == 1:
+                tab_id, ag = tabs[0]
                 await self._maybe_close_tab(tab_id)
-                return f"✅ 已關閉 agent：{agent_name}"
-            names = "、".join(ag.display_name for ag in self.tab_state.agent_tabs.values())
+                return f"✅ 已關閉 agent：{ag.display_name}"
+            names = "、".join(ag.display_name for _, ag in tabs)
             return f"目前有多個開啟中的 agent：{names}。請指定要關閉哪一個。"
-        q = name.lower()
-        for tab_id, ag in list(self.tab_state.agent_tabs.items()):
-            if q in ag.display_name.lower() or (ag.nickname and q in ag.nickname.lower()):
-                agent_name = ag.display_name
-                await self._maybe_close_tab(tab_id)
-                return f"✅ 已關閉 agent：{agent_name}"
-        return f"找不到開啟中的 agent：{name}"
+        try:
+            tab_id = self.agents.find(name)
+        except LookupError as e:
+            return f"❌ {e}"
+        if tab_id == AgentRegistry.MAIN_ID:
+            return "❌ main agent 不能關閉"
+        agent_name = self.agents.get(tab_id).display_name
+        await self._maybe_close_tab(tab_id)
+        return f"✅ 已關閉 agent：{agent_name}"
 
     async def _app_delete_agent(self, name: str) -> str:
         from core.agent_factory import find_all_agents, delete_agent
@@ -424,22 +418,17 @@ class AppToolsMixin(_MixinBase):
     async def _app_send_to_agent(self, name: str, message: str, caller: "Agent | None" = None) -> str:
         from loguru import logger
         from app import AgentMessage
-        sender_name = caller.display_name if caller else (self.tab_state.main_agent or self.agent).display_name
-        q = name.strip().lower()
-        main = self.tab_state.main_agent
-        if main and q in ("main", "chat", main.display_name.lower()):
-            logger.info(f"[inbox] send: {sender_name} → main")
-            self.post_message(AgentMessage(sender=sender_name, target="main", content=message))
-            return "✅ 訊息已傳送給 main agent"
-        for ag in self.tab_state.agent_tabs.values():
-            nick = (ag.nickname or "").lower()
-            dir_name = (ag._agent_dir.name if ag._agent_dir else "").lower()
-            if q in nick or nick in q or q in dir_name or dir_name in q:
-                logger.info(f"[inbox] send: {sender_name} → {ag.display_name}")
-                self.post_message(AgentMessage(sender=sender_name, target=ag.display_name, content=message))
-                return f"✅ 訊息已傳送給 {ag.display_name}"
-        logger.warning(f"[inbox] send_to_agent 找不到 '{name}'，已開啟：{[a.display_name for a in self.tab_state.agent_tabs.values()]}")
-        return f"❌ 找不到已開啟的 agent：{name}。請先用 load_agent 載入。"
+        sender_name = caller.display_name if caller else self.agents.main.display_name
+        try:
+            tab_id = self.agents.find(name)
+        except LookupError as e:
+            logger.warning(f"[inbox] send_to_agent：{e}")
+            return f"❌ {e}。尚未開啟的話請先用 load_agent 載入。"
+        target = self.agents.get(tab_id)
+        logger.info(f"[inbox] send: {sender_name} → {target.display_name}")
+        # 直接傳 tab id，dispatch 不必再查一次名稱
+        self.post_message(AgentMessage(sender=sender_name, target=tab_id, content=message))
+        return f"✅ 訊息已傳送給 {target.display_name}"
 
     async def _app_set_tts(self, engine: str) -> str:
         self._do_tts_switch(engine)

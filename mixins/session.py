@@ -169,8 +169,6 @@ class SessionMixin(_MixinBase):
         agent.history = []
         agent._rebuild_system_prompt()
         agent.save_history()
-        # await 期間 TabActivated 可能把 self.agent 換成 main agent，顯式還原
-        self.agent = agent
         self._update_subtitle()
         self.query_one("#file-tree", FileTree).refresh_tree()
 
@@ -216,7 +214,6 @@ class SessionMixin(_MixinBase):
         await msgs.remove_children()
         agent.reset_history()
         await self._render_history_into(msgs, agent)
-        self.agent = agent
         self._update_subtitle()
         name_display = store.name or archive.name
         self.notify(f"已載入：{name_display}（有新對話後才會重新封存）", timeout=4)

@@ -12,10 +12,6 @@ asyncio 生命週期物件（_mcp_task、_bash_proc、_tts_future 等）
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from core.agent import Agent
 
 
 @dataclass
@@ -50,10 +46,8 @@ class UIState:
 
 @dataclass
 class TabState:
-    """Tab 管理：agent tabs、檔案 tab 計數、pending 工具排程。"""
+    """Tab 管理：檔案 tab 計數、pending 工具排程。agent tab 由 core.agent_registry 管理。"""
 
-    agent_tabs: dict[str, "Agent"] = field(default_factory=dict)
-    main_agent: "Agent | None" = None
     file_tab_counter: int = 0
     pending_open_agent: str | None = None
     streaming_tabs: set[str] = field(default_factory=set)
