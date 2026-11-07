@@ -14,6 +14,7 @@ wheels/
 history.json
 .history/
 agents/
+!docs/agents/
 .prompt_history
 .aider*
 images/

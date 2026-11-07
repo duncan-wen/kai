@@ -430,3 +430,17 @@ See `CONVENTIONS.md` for the full style guide. Key points:
 - `prompt_toolkit` — input history file format (FileHistory)
 - `tenacity` — retry logic in `web_search`
 - `loguru` — structured logging to `agent_tui.log`
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues (`duncan-wen/kai`), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root (created lazily). See `docs/agents/domain.md`.
