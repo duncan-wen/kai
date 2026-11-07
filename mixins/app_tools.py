@@ -238,7 +238,7 @@ class AppToolsMixin(_MixinBase):
         q = name.lower()
         for tab_id, agent in self.tab_state.agent_tabs.items():
             dn = agent.display_name.lower()
-            nick = (agent._nickname or "").lower()
+            nick = (agent.nickname or "").lower()
             if q == dn or q == nick or q in dn or (nick and q in nick):
                 try:
                     tc = self.query_one("#center-tabs", TabbedContent)
@@ -268,7 +268,7 @@ class AppToolsMixin(_MixinBase):
             return f"目前有多個開啟中的 agent：{names}。請指定要關閉哪一個。"
         q = name.lower()
         for tab_id, ag in list(self.tab_state.agent_tabs.items()):
-            if q in ag.display_name.lower() or (ag._nickname and q in ag._nickname.lower()):
+            if q in ag.display_name.lower() or (ag.nickname and q in ag.nickname.lower()):
                 agent_name = ag.display_name
                 await self._maybe_close_tab(tab_id)
                 return f"✅ 已關閉 agent：{agent_name}"
@@ -303,8 +303,7 @@ class AppToolsMixin(_MixinBase):
 
     async def _app_switch_model(self, model: str) -> str:
         try:
-            await self.action_switch_model(model)
-            return f"✅ 已切換至 {model}"
+            return await self.action_switch_model(model)
         except Exception as e:
             return f"切換失敗：{e}"
 
@@ -433,7 +432,7 @@ class AppToolsMixin(_MixinBase):
             self.post_message(AgentMessage(sender=sender_name, target="main", content=message))
             return "✅ 訊息已傳送給 main agent"
         for ag in self.tab_state.agent_tabs.values():
-            nick = (ag._nickname or "").lower()
+            nick = (ag.nickname or "").lower()
             dir_name = (ag._agent_dir.name if ag._agent_dir else "").lower()
             if q in nick or nick in q or q in dir_name or dir_name in q:
                 logger.info(f"[inbox] send: {sender_name} → {ag.display_name}")
@@ -453,14 +452,3 @@ class AppToolsMixin(_MixinBase):
         label = "開啟" if enabled else "關閉"
         self.notify(f"Greeting：{label}", severity="information", timeout=3)
         return f"✅ Greeting 已{label}（下次載入 agent 時生效）"
-
-    # ── 切換模型後重新注入（新 Agent 物件需要重注入）──────────────────────────
-
-    async def action_switch_model(self, model_name: str) -> None:
-        await super().action_switch_model(model_name)  # type: ignore[misc]
-        try:
-            from textual.widgets import TabbedContent
-            if self.query_one("#center-tabs", TabbedContent).active == "chat":
-                self._inject_app_tools(self.agent)
-        except Exception:
-            pass

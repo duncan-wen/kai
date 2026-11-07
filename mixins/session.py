@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 from textual.containers import VerticalScroll
-from textual.widgets import Static, TabbedContent
+from textual.widgets import Static
 
 from core.agent import Agent
 from core.session_store import SessionStore
@@ -221,28 +221,25 @@ class SessionMixin(_MixinBase):
         name_display = store.name or archive.name
         self.notify(f"已載入：{name_display}（有新對話後才會重新封存）", timeout=4)
 
-    async def action_switch_model(self, model_name: str) -> None:
+    async def action_switch_model(self, model_name: str) -> str:
+        """換目前 Agent 的模型，回傳給使用者／AI 看的結果訊息。"""
         if model_name not in REGISTRY:
             self.notify(f"未知模型：{model_name}", severity="error")
-            return
+            return f"❌ 未知模型：{model_name}"
         if model_name == self.agent.profile.name:
             self.notify("已是目前模型", severity="information")
-            return
-        old_history = self.agent.history[:]
-        old_mcp = self.agent.mcp_client
-        old_ctx = getattr(self.agent, "mcp_context", "")
-        self.agent = Agent(model=model_name)
-        self.agent.history = old_history
-        self.agent.mcp_client = old_mcp
-        self.agent.mcp_context = old_ctx
-        self.agent._rebuild_system_prompt()
+            return f"已是 {model_name}"
+        # 在原物件上換模型：agent tab 的 definition 設定、注入的工具都保留；只改記憶體，不寫回 config.json
         self.ui_state.think_override = None
-        tc = self.query_one("#center-tabs", TabbedContent)
-        if tc.active == "chat":
-            self.tab_state.main_agent = self.agent
+        if not self.agent.switch_model(model_name):
+            # AI 在自己的 turn 中途要求換模型：這個 turn 跑完才生效（UI 在 turn 結束時同步）
+            msg = f"✅ 這則回覆結束後改用 {model_name}"
+            self.notify(msg, severity="information")
+            return msg
         self._sync_cap_bar()
         prompt = self.query_one("#prompt", HistoryInput)
-        prompt.placeholder = f"傳訊息給 {get_nickname(model_name)}..."
-        self.sub_title = get_nickname(model_name)
+        prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
+        self._update_subtitle()
         self.query_one("#sidebar", Sidebar).set_model(model_name)
         self.notify(f"已切換至 {model_name}", severity="information")
+        return f"✅ 已切換至 {model_name}"

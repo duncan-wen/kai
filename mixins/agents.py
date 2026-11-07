@@ -6,14 +6,14 @@ from textual.containers import VerticalScroll
 from textual.widgets import TabbedContent, TabPane
 
 from core.agent import Agent
-
-from core.models import REGISTRY
+from core.agent_factory import read_definition
 from mixins.streaming import SPINNER
 from widgets.input import HistoryInput
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app import AgentMessage, ChatApp as _MixinBase
+    from core.agent_factory import AgentDefinition
 else:
     _MixinBase = object  # type: ignore[assignment,misc]
 
@@ -70,6 +70,19 @@ class AgentsMixin(_MixinBase):
             prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
             prompt.focus()
 
+    def _apply_definition(self, agent: "Agent", defn: "AgentDefinition") -> list[str]:
+        """套用 definition；需要 MCP 但還沒有 client 時共用 main agent 的。回傳變更清單。"""
+        changes = agent.apply_definition(defn)
+        main = self.tab_state.main_agent
+        if agent.mcp_enabled and agent.mcp_client is None and main is not None:
+            agent.mcp_client = main.mcp_client
+            agent.mcp_context = main.mcp_context
+            agent._rebuild_system_prompt()
+        for c in changes:
+            if c.startswith("⚠️"):
+                self.notify(c, severity="warning")
+        return changes
+
     async def _do_load_agent(self, name: str) -> None:
         from core.agent_factory import find_agent, load_agent
         # scope 前綴（來自 AgentsScreen）直接傳入；否則做模糊比對
@@ -78,9 +91,9 @@ class AgentsMixin(_MixinBase):
         else:
             resolved = find_agent(name) or name
         try:
-            data, adir = load_agent(resolved)
-        except FileNotFoundError as e:
-            self.notify(str(e), severity="error")
+            defn, adir = load_agent(resolved)
+        except (FileNotFoundError, ValueError) as e:
+            self.notify(f"載入 agent 失敗：{e}", severity="error")
             return
         # 已開啟同一個 agent dir → 切換過去，不重複建 tab
         for tab_id, existing in list(self.tab_state.agent_tabs.items()):
@@ -88,38 +101,15 @@ class AgentsMixin(_MixinBase):
                 tc = self.query_one("#center-tabs", TabbedContent)
                 tc.active = tab_id
                 self.agent = existing
-                display = data.get("nickname") or data["name"]
-                self.notify(f"{display} 已開啟，切換過去", timeout=2)
+                self.notify(f"{defn.display_name} 已開啟，切換過去", timeout=2)
                 return
-        model = data.get("model", self.agent.profile.name)
-        if model not in REGISTRY:
-            self.notify(f"未知模型：{model}，改用 {self.agent.profile.name}", severity="warning")
-            model = self.agent.profile.name
         agent = Agent(
-            model=model,
+            model=self.agent.profile.name,
             history_file=adir / "history.json",
             agent_dir=adir,
-            system_prompt=data["system_prompt"],
         )
-        # mcp_servers 明確設為 {} 表示不要 MCP；省略或非空則共用 main agent 的 MCP client
-        mcp_cfg = data.get("mcp_servers")
-        if mcp_cfg != {}:
-            agent.mcp_client = self.agent.mcp_client
-            agent.mcp_context = getattr(self.agent, "mcp_context", "")
-        nickname = data.get("nickname") or data["name"]
-        # 不寫 os.environ 以免污染使用相同 model 的 main agent 暱稱
-        agent._nickname = nickname
-        if "history_keep" in data:
-            agent.history_keep = int(data["history_keep"])
-        agent.datasets = data.get("datasets", [])
-        # TTS config：True → 預設設定，dict → 自訂 voice/player
-        tts_raw = data.get("tts")
-        if tts_raw is True:
-            agent._tts_config = {"voice": "en-US-AriaNeural"}
-        elif isinstance(tts_raw, dict) and tts_raw:
-            agent._tts_config = tts_raw
-        else:
-            agent._tts_config = None
+        self._apply_definition(agent, defn)
+        nickname = defn.display_name
         tab_idx = len(self.tab_state.agent_tabs)
         tab_id = f"agent-{tab_idx}"
         scroll = VerticalScroll(id=f"msgs-agent-{tab_idx}")
@@ -130,10 +120,10 @@ class AgentsMixin(_MixinBase):
         tc.active = tab_id
         self.agent = agent
         await self._render_history_into(scroll, agent)
-        self.notify(f"✅ 已開啟 agent：{data['name']}", timeout=3)
+        self.notify(f"✅ 已開啟 agent：{defn.name}", timeout=3)
         self._inject_interagent_tools(agent)
         # 若 config 有 greeting 且是全新對話，觸發 AI 主動開場
-        greeting = data.get("greeting", "").strip()
+        greeting = defn.greeting.strip()
         fresh = not any(m.get("role") != "system" for m in agent.history)
         if greeting and fresh and self.ui_state.greeting_enabled:
             self._trigger_greeting(agent, scroll, greeting)
@@ -165,7 +155,7 @@ class AgentsMixin(_MixinBase):
             target_tab_id = "chat"
         else:
             for tab_id, ag in self.tab_state.agent_tabs.items():
-                nick = (ag._nickname or "").lower()
+                nick = (ag.nickname or "").lower()
                 dir_name = (ag._agent_dir.name if ag._agent_dir else "").lower()
                 if q in nick or nick in q or q in dir_name or dir_name in q:
                     agent = ag
@@ -377,66 +367,16 @@ class AgentsMixin(_MixinBase):
         if not config_path.exists():
             self.notify(f"找不到 {config_path}", severity="error")
             return
-        import json as _json
         try:
-            data = _json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception as e:
+            defn = read_definition(config_path)
+        except ValueError as e:
             self.notify(f"讀取 config.json 失敗：{e}", severity="error")
             return
 
-        name = data.get("nickname") or data.get("name", adir.name)
-        new_prompt = data.get("system_prompt", "")
-        new_model = data.get("model", self.agent.profile.name)
-        changes: list[str] = []
-
-        if new_prompt and new_prompt != self.agent._custom_system_prompt:
-            changes.append("system_prompt")
-        if name != self.agent._nickname:
-            changes.append("nickname")
-
-        # TTS 重載
-        tts_raw = data.get("tts")
-        if tts_raw is True:
-            new_tts: dict | None = {"voice": "en-US-AriaNeural"}
-        elif isinstance(tts_raw, dict) and tts_raw:
-            new_tts = tts_raw
-        else:
-            new_tts = None
-        if new_tts != self.agent._tts_config:
-            changes.append("tts")
-
-        # model 變更：換 Agent 物件；Agent.__init__ 自動從磁碟載入 history
-        if new_model != self.agent.profile.name:
-            if new_model not in REGISTRY:
-                self.notify(f"未知模型：{new_model}", severity="error")
-                return
-            old = self.agent
-            self.agent = Agent(
-                model=new_model,
-                history_file=old._history_file,
-                agent_dir=old._agent_dir,
-                system_prompt=new_prompt or old._custom_system_prompt,
-            )
-            self.agent.mcp_client = old.mcp_client
-            self.agent.mcp_context = getattr(old, "mcp_context", "")
-            self.agent._nickname = name
-            self.agent._tts_config = new_tts
-            # 同步更新 agent_tabs 映射
-            for tid, ag in list(self.tab_state.agent_tabs.items()):
-                if ag is old:
-                    self.tab_state.agent_tabs[tid] = self.agent
-                    break
-            changes.append(f"model → {new_model}")
-        else:
-            # 以磁碟為準重載 history（不呼叫 save_history，避免覆寫使用者手動編輯）
-            if new_prompt:
-                self.agent._custom_system_prompt = new_prompt
-            self.agent._nickname = name
-            self.agent._tts_config = new_tts
-            self.agent.datasets = data.get("datasets", [])
-            self.agent.history = []
-            self.agent._rebuild_system_prompt()   # 先把新 system prompt 放進去
-            self.agent._load_history()            # 再從磁碟補入 non-system 訊息
+        changes = self._apply_definition(self.agent, defn)
+        # 以磁碟為準重載 history（不呼叫 save_history，避免覆寫使用者手動編輯）
+        self.agent.reset_history()
+        name = defn.display_name
 
         # 更新 UI
         from widgets.sidebar import Sidebar
@@ -461,7 +401,7 @@ class AgentsMixin(_MixinBase):
         self.notify(f"✅ {name} 已重載：{change_str}", timeout=4)
 
     async def _do_delete_agent(self, name: str) -> None:
-        from core.agent_factory import list_agents, load_agent, delete_agent
+        from core.agent_factory import delete_agent, find_agent_dir, list_agents
         from widgets.agents_screen import ConfirmDeleteAgentScreen, DeleteAgentsScreen
         from widgets.tree import FileTree
 
@@ -469,11 +409,11 @@ class AgentsMixin(_MixinBase):
             agents_meta: list[tuple[str, str, str]] = []
             for scoped_name in scoped_names:
                 try:
-                    data, adir = load_agent(scoped_name)
+                    adir = find_agent_dir(scoped_name)
                 except FileNotFoundError as e:
                     self.notify(str(e), severity="error")
                     return
-                agent_name = data.get("name", adir.name)
+                agent_name = adir.name
                 scope_path = "~/.kai/agents" if scoped_name.startswith("global:") else "agents"
                 agents_meta.append((agent_name, scope_path, adir.name))
 

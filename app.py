@@ -737,7 +737,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         _ENGINES = ("edge-tts", "azure-tts", "kokoro", "kokoro-api", "melotts", "off")
         engine = arg.strip().lower()
         if not engine:
-            cfg = getattr(self.agent, "_tts_config", None)
+            cfg = getattr(self.agent, "tts_config", None)
             if cfg:
                 self.notify(f"TTS 目前：{cfg.get('engine', 'edge-tts')}  voice={cfg.get('voice', '—')}", timeout=4)
             else:
@@ -747,7 +747,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             self.notify(f"未知引擎：{engine}  可用：{', '.join(_ENGINES)}", severity="warning")
             return
         if engine == "off":
-            self.agent._tts_config = None
+            self.agent.tts_config = None
             self.notify("TTS 已關閉", timeout=3)
             return
         _defaults: dict[str, dict] = {
@@ -757,9 +757,9 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             "edge-tts":   {"voice": "en-US-AriaNeural",       "lang": "en-us"},
             "azure-tts":  {"voice": "zh-TW-HsiaoChenNeural",  "lang": "zh-TW"},
         }
-        cfg = dict(getattr(self.agent, "_tts_config", None) or {})
+        cfg = dict(getattr(self.agent, "tts_config", None) or {})
         cfg.update({"engine": engine, **_defaults[engine]})
-        self.agent._tts_config = cfg
+        self.agent.tts_config = cfg
         voice_info = cfg["voice"]
         if engine == "azure-tts" and not (cfg.get("key") or _kai_cfg.AZURE_TTS_KEY):
             voice_info += "  ⚠️ 需設定 AZURE_TTS_KEY"

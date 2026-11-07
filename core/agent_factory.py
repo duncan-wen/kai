@@ -6,7 +6,40 @@ import re
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, field_validator
+
 REQUIRED_FIELDS = {"name", "model", "system_prompt"}
+
+DEFAULT_TTS_VOICE = "en-US-AriaNeural"
+
+
+class AgentDefinition(BaseModel):
+    """磁碟上 agents/<name>/config.json 的內容；開啟或 reload 時套用到 Agent。"""
+
+    name: str
+    model: str
+    system_prompt: str
+    nickname: str | None = None
+    description: str = ""
+    greeting: str = ""
+    history_keep: int | None = None  # None = 用全域 HISTORY_KEEP
+    datasets: list[str] = []
+    mcp_servers: dict | None = None  # {} = 不用 MCP；None 或非空 = 共用 main agent 的 MCP
+    tts: dict | None = None
+
+    @field_validator("tts", mode="before")
+    @classmethod
+    def _normalize_tts(cls, raw: Any) -> dict | None:
+        """True → 預設語音；非空 dict → 原樣；其他（False、{}、None）→ 不啟用。"""
+        if raw is True:
+            return {"voice": DEFAULT_TTS_VOICE}
+        if isinstance(raw, dict) and raw:
+            return raw
+        return None
+
+    @property
+    def display_name(self) -> str:
+        return self.nickname or self.name
 
 GLOBAL_AGENTS_DIR = Path.home() / ".kai" / "agents"
 
@@ -197,8 +230,8 @@ def find_agent(query: str) -> str | None:
     return None
 
 
-def load_agent(name: str) -> tuple[dict[str, Any], Path]:
-    """載入 agent config。
+def find_agent_dir(name: str) -> Path:
+    """找出 agent 目錄。
 
     name 可為：
     - "local:<dir>"  / "global:<dir>"  — 指定 scope
@@ -218,17 +251,28 @@ def load_agent(name: str) -> tuple[dict[str, Any], Path]:
 
     for base in bases:
         for candidate in (name, _slugify(name), name.lower().replace(" ", "-")):
-            p = base / candidate / "config.json"
-            if p.exists():
-                text = p.read_text(encoding="utf-8")
-                try:
-                    return json.loads(text), p.parent
-                except json.JSONDecodeError:
-                    return json.loads(_escape_json_strings(text)), p.parent
+            if (base / candidate / "config.json").exists():
+                return base / candidate
 
     raise FileNotFoundError(
         f"找不到 agent：{name}（搜尋：{[str(b) for b in bases]}）"
     )
+
+
+def read_definition(config_path: Path) -> AgentDefinition:
+    """讀取 config.json 成 AgentDefinition；格式錯誤時 raise ValueError。"""
+    text = config_path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = json.loads(_escape_json_strings(text))
+    return AgentDefinition.model_validate(data)
+
+
+def load_agent(name: str) -> tuple[AgentDefinition, Path]:
+    """依名稱找到 agent 目錄並讀取它的 definition。"""
+    adir = find_agent_dir(name)
+    return read_definition(adir / "config.json"), adir
 
 
 def save_agent(data: dict[str, Any], global_scope: bool = False) -> Path:
@@ -256,7 +300,7 @@ def save_agent(data: dict[str, Any], global_scope: bool = False) -> Path:
 def delete_agent(scoped_name: str) -> str:
     """刪除 agent 目錄（含 config.json / history.json），回傳 agent 顯示名稱。"""
     import shutil
-    _, adir = load_agent(scoped_name)
+    adir = find_agent_dir(scoped_name)
     try:
         display_name = json.loads((adir / "config.json").read_text(encoding="utf-8")).get("name", adir.name)
     except Exception:

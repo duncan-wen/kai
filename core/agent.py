@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import ollama
 from loguru import logger
@@ -19,7 +20,7 @@ from .config import (
     HISTORY_KEEP,
     get_nickname,
 )
-from .models import ModelProfile, get_profile
+from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .tools import (
     BASH_TOOL,
@@ -38,6 +39,9 @@ try:
     from .mcp_client import MCPClient
 except ImportError:
     MCPClient = None  # type: ignore
+
+if TYPE_CHECKING:
+    from .agent_factory import AgentDefinition
 
 
 class Agent:
@@ -64,8 +68,11 @@ class Agent:
         self.mcp_context: str = ""
         self.last_prediction: str = ""
         self._cancelled = False
-        self._tts_config: dict | None = None  # 由 _do_load_agent 注入；None 表示不啟用 TTS
-        self._nickname: str | None = None    # agent tab 的顯示暱稱；不寫 os.environ 以免污染 main agent
+        self.tts_config: dict | None = None  # 由 apply_definition 設定；None 表示不啟用 TTS
+        self.nickname: str | None = None    # agent tab 的顯示暱稱；不寫 os.environ 以免污染 main agent
+        self.mcp_enabled: bool = True  # definition 的 mcp_servers 設為 {} 時為 False
+        self._in_turn: bool = False  # chat() 執行中
+        self._pending_model: str | None = None  # turn 中途要求換的模型，turn 結束後生效
         # agent 專屬目錄（存 history.json / notes.md；None 表示用 cwd/.kai）
         self._agent_dir: "Path | None" = agent_dir
         self._history_file: Path = history_file or HISTORY_FILE
@@ -237,10 +244,62 @@ class Agent:
         else:
             self.history.insert(0, system_msg)
 
+    def switch_model(self, model: str) -> bool:
+        """在原物件上換模型：只替換 profile，其他欄位（history、注入的工具、definition 設定）全部保留。
+
+        turn 進行中（例如 AI 透過工具要求換模型）時延後到 turn 結束才生效，
+        避免同一個 turn 的 messages 混用兩種 backend 格式。回傳 True 表示立即生效。
+        """
+        if model not in REGISTRY:
+            raise ValueError(f"未知模型：{model}")
+        if self._in_turn:
+            self._pending_model = model
+            return False
+        self._apply_model(model)
+        return True
+
+    def _apply_model(self, model: str) -> None:
+        self.profile = get_profile(model)
+        if _cfg.NUM_CTX:
+            self.profile.num_ctx = _cfg.NUM_CTX
+        self._rebuild_system_prompt()
+
+    def apply_definition(self, defn: "AgentDefinition") -> list[str]:
+        """把 agent definition 套用到這個 Agent 上（開啟與 reload 共用）。
+
+        所有 per-agent 欄位只在這裡設定；definition 沒寫的欄位回到預設值。
+        回傳變更清單，供 UI 顯示。
+        """
+        changes: list[str] = []
+        if defn.system_prompt != self._custom_system_prompt:
+            changes.append("system_prompt")
+        if defn.display_name != self.nickname:
+            changes.append("nickname")
+        if defn.tts != self.tts_config:
+            changes.append("tts")
+        if defn.model != self.profile.name:
+            if defn.model in REGISTRY:
+                applied = self.switch_model(defn.model)
+                changes.append(f"model → {defn.model}" + ("" if applied else "（這則回覆結束後生效）"))
+            else:
+                changes.append(f"⚠️ 未知模型：{defn.model}，保留 {self.profile.name}")
+
+        self._custom_system_prompt = defn.system_prompt
+        self.nickname = defn.display_name
+        self.tts_config = defn.tts
+        self.history_keep = defn.history_keep if defn.history_keep is not None else HISTORY_KEEP
+        self.datasets = list(defn.datasets)
+        self.mcp_enabled = defn.mcp_servers != {}
+        if not self.mcp_enabled:
+            self.mcp_client = None
+            self.mcp_context = ""
+        self._rebuild_system_prompt()
+        return changes
+
     @property
     def display_name(self) -> str:
-        """顯示名稱：agent tab 用 _nickname，main agent 用 get_nickname（讀 env/.env）。"""
-        return self._nickname or get_nickname(self.profile.name)
+        """顯示名稱：agent tab 用 nickname，main agent 用 get_nickname（讀 env/.env）。"""
+        return self.nickname or get_nickname(self.profile.name)
 
     # 時間相關的關鍵字，匹配到即視為時間問答訊息
     _TIME_KEYWORDS = ("現在時間", "幾點", "幾点", "時間是", "時區", "UTC")
@@ -376,6 +435,17 @@ class Agent:
         return content
 
     async def chat(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
+        """單輪對話；turn 中途要求的換模型在 turn 結束後才生效。"""
+        self._in_turn = True
+        try:
+            return await self._run_turn(user_msg, on_token, on_thinking, on_done, on_tool_call, on_retry)
+        finally:
+            self._in_turn = False
+            if self._pending_model:
+                model, self._pending_model = self._pending_model, None
+                self._apply_model(model)
+
+    async def _run_turn(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """
         單輪對話入口，支援 tool calling loop：
           1. 呼叫模型（stream）

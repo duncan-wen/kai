@@ -135,7 +135,7 @@ class StreamingMixin(_MixinBase):
                 if at_bot:
                     msgs.scroll_end(animate=False)
                 # TTS：整段回覆完成後在獨立執行緒播放，完全隔離 Textual event loop
-                _tts_cfg = getattr(agent, "_tts_config", None)
+                _tts_cfg = getattr(agent, "tts_config", None)
                 if _tts_cfg and _display and not ephemeral:
                     from core.tts import cancel_current as _tts_cancel, get_tts_loop, speak
                     from loguru import logger as _log
@@ -292,6 +292,10 @@ class StreamingMixin(_MixinBase):
                 prompt.disabled = False
                 prompt.reset_prediction(f"傳訊息給 {agent.display_name}...")
                 prompt.focus()
+                # turn 中途要求的換模型此時才生效，同步顯示
+                self.query_one("#sidebar", Sidebar).set_model(agent.profile.name)
+                self._update_subtitle()
+                self._sync_cap_bar()
                 if self.input_state.restore_input:
                     self.input_state.restore_input = False
                     restored = self.input_state.last_send_text

@@ -127,7 +127,7 @@ ChatApp → MCPMixin → AgentsMixin → AppToolsMixin → SessionMixin → Bash
 
 - 主 chat tab 不在 `_agent_tabs` 裡，永遠不會被關閉
 - 不帶 name：只有一個 agent tab → 直接關；多個 → 列出讓使用者指定
-- 帶 name：模糊比對 `display_name` / `_nickname`
+- 帶 name：模糊比對 `display_name` / `nickname`
 
 ### 防 hallucination（AI 假裝執行）
 
