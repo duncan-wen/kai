@@ -1,7 +1,6 @@
 """ResumeScreen — 歸檔 session 選擇器 ModalScreen。"""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from rich.text import Text
@@ -12,9 +11,14 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList
 from textual.widgets.option_list import Option
 
+from core.session_archive import SessionArchive
 
-class ResumeScreen(ModalScreen[int | None]):
-    """顯示歸檔 session 清單；選取後 dismiss(index)，Escape dismiss(None)。"""
+
+class ResumeScreen(ModalScreen[Path | None]):
+    """顯示 archive 清單；選取後 dismiss(archive 路徑)，Escape dismiss(None)。
+
+    讀取、改名、刪除都交給 SessionArchive；這裡只負責顯示。
+    """
 
     BINDINGS = [
         Binding("escape", "dismiss_or_cancel", show=False),
@@ -56,43 +60,27 @@ class ResumeScreen(ModalScreen[int | None]):
     }
     """
 
-    def __init__(self, entries: list[dict], archives: list[Path], names_file: Path, current_archive: Path | None = None) -> None:
-        """
-        entries:        list of dicts with keys: ts, count, preview
-        archives:       corresponding archive Path list (same order as entries)
-        names_file:     path to .history/.names.json
-        current_archive: 目前正在使用的歸檔路徑（_resumed_from），用於標記當前 session
-        dismiss value:  selected index (0-based) or None if cancelled
-        """
+    def __init__(self, archive: SessionArchive) -> None:
         super().__init__()
-        self._entries = entries
-        self._archives = archives
-        self._names_file = names_file
-        self._current_archive = current_archive
-        self._names: dict[str, str] = {}
-        if names_file.exists():
-            try:
-                self._names = json.loads(names_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+        self._sa = archive
+        self._entries = archive.list_archives()
         self._rename_idx: int | None = None
 
     # ── build ─────────────────────────────────────────────────────────────────
 
     def _make_option(self, i: int) -> Option:
         e = self._entries[i]
-        arch = self._archives[i]
-        name = self._names.get(arch.name, "")
-        is_current = self._current_archive is not None and arch == self._current_archive
+        name = e.name
+        is_current = e.path == self._sa.resumed_from
         return Option(
             Text.assemble(
                 ("▶ " if is_current else "  ", "bold green"),
                 (f"[{i + 1:2d}]  ", "dim"),
                 (name + "  ", "bold yellow") if name else ("", ""),
-                (e["ts"], "bold cyan"),
+                (e.timestamp, "bold cyan"),
                 ("  ", ""),
-                (f"{e['count']:3d} 則  ", "green"),
-                (e["preview"] + "…", ""),
+                (f"{e.message_count:3d} 則  ", "green"),
+                (e.preview + "…", ""),
             ),
             id=str(i),
         )
@@ -113,7 +101,7 @@ class ResumeScreen(ModalScreen[int | None]):
             return
         self._rename_idx = idx
         inp = self.query_one("#rename-input", Input)
-        inp.value = self._names.get(self._archives[idx].name, "")
+        inp.value = self._entries[idx].name
         inp.display = True
         inp.focus()
 
@@ -122,20 +110,11 @@ class ResumeScreen(ModalScreen[int | None]):
         if self._rename_idx is None:
             return
         idx = self._rename_idx
-        name = event.value.strip()
-        key = self._archives[idx].name
-        if name:
-            self._names[key] = name
-        else:
-            self._names.pop(key, None)
         try:
-            self._names_file.parent.mkdir(exist_ok=True)
-            self._names_file.write_text(
-                json.dumps(self._names, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+            self._sa.rename_archive(self._entries[idx].path, event.value.strip())
+        except OSError as e:
+            self.notify(f"命名失敗：{e}", severity="error")
+        self._entries = self._sa.list_archives()
         self._finish_rename(idx)
 
     def action_dismiss_or_cancel(self) -> None:
@@ -164,27 +143,13 @@ class ResumeScreen(ModalScreen[int | None]):
         idx = ol.highlighted
         if idx is None:
             return
-        arch = self._archives[idx]
-        # 刪除實體檔案
         try:
-            arch.unlink(missing_ok=True)
-        except Exception:
-            pass
-        # 清理 .names.json
-        self._names.pop(arch.name, None)
-        try:
-            self._names_file.write_text(
-                json.dumps(self._names, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-        # 如果刪的是目前 resumed session，清除標記
-        if self._current_archive == arch:
-            self._current_archive = None
-        # 從清單移除並重建（序號需要重排）
-        self._entries.pop(idx)
-        self._archives.pop(idx)
+            self._sa.delete_archive(self._entries[idx].path)
+        except OSError as e:
+            self.notify(f"刪除失敗：{e}", severity="error")
+            return
+        # 重新讀取並重建（序號需要重排）
+        self._entries = self._sa.list_archives()
         if not self._entries:
             self.dismiss(None)
             return
@@ -203,4 +168,4 @@ class ResumeScreen(ModalScreen[int | None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if self.query_one("#rename-input", Input).display:
             return  # 正在改名，忽略點擊
-        self.dismiss(int(event.option_id))
+        self.dismiss(self._entries[int(event.option_id)].path)

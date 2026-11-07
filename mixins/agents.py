@@ -277,6 +277,8 @@ class AgentsMixin(_MixinBase):
             full_content = content + f"\n\n[系統]完成後必須呼叫 send_to_agent(\"{reply_to}\", 結果摘要) 回報。"
 
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
+        # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
+        self._session_archive(agent).mark_active()
         try:
             async with agent._chat_lock:
                 await agent.chat(

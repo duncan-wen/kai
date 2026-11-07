@@ -12,7 +12,6 @@ asyncio 生命週期物件（_mcp_task、_bash_proc、_tts_future 等）
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,12 +20,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class SessionState:
-    """Session 識別與目錄導航狀態。"""
+    """目錄導航狀態。session 名稱與 resume 狀態在磁碟上，見 core.session_archive。"""
 
-    resumed_from: Path | None = None
-    tab_resumed_from: dict[str, Path | None] = field(default_factory=dict)
-    name: str = ""
-    tab_names: dict[str, str] = field(default_factory=dict)
     prev_cwd: str = ""
 
 

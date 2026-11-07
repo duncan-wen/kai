@@ -213,26 +213,8 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             return f"✅ 找到 agent：{dir_name}，正在開啟..."
 
         self.agent.tools_map["open_agent"] = _open_agent_tool
-        # 還原跨重啟的 resume 狀態，避免誤將 resume 後的 history.json 重複歸檔
-        _hist_dir = self.agent._history_file.resolve().parent / ".history"
-        _state = _hist_dir / ".resumed_from"
-        if _state.exists():
-            _arch = _state.parent / _state.read_text(encoding="utf-8").strip()
-            if _arch.exists():
-                self.session.resumed_from = _arch
-                self.session.tab_resumed_from["chat"] = _arch
-                self._load_session_name_from_archive(_arch)
-        # 還原 /rename 命名（優先於歸檔名稱）
-        _name_file = _hist_dir / ".current_name"
-        if _name_file.exists():
-            try:
-                _saved_name = _name_file.read_text(encoding="utf-8").strip()
-                if _saved_name:
-                    self.session.name = _saved_name
-                    self.session.tab_names["chat"] = _saved_name
-                    self._update_subtitle()
-            except Exception:
-                pass
+        # session 名稱與 resume 狀態都在磁碟上（SessionArchive），這裡只需更新標題
+        self._update_subtitle()
         self.query_one("#prompt", HistoryInput).focus()
         self._update_prompt_title()
         self._render_history()
@@ -526,6 +508,8 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
                 if not self.input_state.last_ephemeral:
                     self.notify("沒有可保存的 /ask 回答", severity="warning")
                 else:
+                    # 存入的 /ask 回答算新對話：session 不再是 resumed session
+                    self._session_archive().mark_active()
                     self.agent.history.extend(self.input_state.last_ephemeral)
                     self.agent.save_history()
                     self.input_state.last_ephemeral = None
@@ -842,8 +826,6 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
             sidebar.set_model(self.agent.profile.name)
             mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
             sidebar.set_mcp(mcp_sum)
-            self.session.resumed_from = self.session.tab_resumed_from.get(tab_id, None)
-            self.session.name = self.session.tab_names.get(tab_id, "")
             self._update_subtitle()
             self._sync_cap_bar()
         elif tab_id == "chat":
@@ -854,8 +836,6 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
                 sidebar.set_model(self.agent.profile.name)
                 mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
                 sidebar.set_mcp(mcp_sum)
-                self.session.resumed_from = self.session.tab_resumed_from.get("chat", None)
-                self.session.name = self.session.tab_names.get("chat", "")
                 self._update_subtitle()
                 self._sync_cap_bar()
         # 根據新 tab 是否正在串流，恢復或保持 prompt 鎖定狀態

@@ -45,16 +45,8 @@ class StreamingMixin(_MixinBase):
         except Exception:
             _my_tab_id = "chat"
         if not ephemeral:
-            self.session.resumed_from = None
-            # 清除持久化 resume 狀態：有新訊息代表已脫離 resume 快照
-            _state = agent._history_file.resolve().parent / ".history" / ".resumed_from"
-            _state.unlink(missing_ok=True)
-            try:
-                from textual.widgets import TabbedContent
-                tab_id = self.query_one("#center-tabs", TabbedContent).active or "chat"
-                self.session.tab_resumed_from.pop(tab_id, None)
-            except Exception:
-                pass
+            # 有新訊息代表已脫離 resume 快照
+            self._session_archive(agent).mark_active()
         _history_snapshot = [m.copy() for m in agent.history] if ephemeral else None
         self.ui_state.spin_idx = 0
         self.ui_state.spin_label = "等待回覆"

@@ -1,18 +1,15 @@
 """SessionMixin — /nickname, /cd, /compact, /cls, /resume, /model 指令邏輯。"""
 from __future__ import annotations
 
-import json
 import os
-import shutil
-from datetime import datetime
 from pathlib import Path
 
-from loguru import logger
 
 from textual.containers import VerticalScroll
 from textual.widgets import Static, TabbedContent
 
 from core.agent import Agent
+from core.session_archive import SessionArchive
 from core.config import _normalize, apply_kai_config, current_kai_config, ensure_kai_dir, get_nickname, load_kai_config, reload_env
 from core.models import REGISTRY
 from widgets.input import HistoryInput
@@ -92,19 +89,6 @@ class SessionMixin(_MixinBase):
         os.chdir(target)
         ensure_kai_dir()
         self._apply_project_config()
-        # reset session state for new directory
-        self.session.resumed_from = None
-        self.session.tab_resumed_from["chat"] = None
-        self.session.name = ""
-        self.session.tab_names.pop("chat", None)
-        # check if new directory has a persisted resume state
-        _state = self.agent._history_file.resolve().parent / ".history" / ".resumed_from"
-        if _state.exists():
-            _arch = _state.parent / _state.read_text(encoding="utf-8").strip()
-            if _arch.exists():
-                self.session.resumed_from = _arch
-                self.session.tab_resumed_from["chat"] = _arch
-                self._load_session_name_from_archive(_arch)
         self.query_one("#sb-cwd", Static).update(str(target))
         self.query_one("#file-tree", FileTree).refresh_tree()
         self.agent.reset_history()
@@ -133,70 +117,33 @@ class SessionMixin(_MixinBase):
 
     # ── session 命名 ──────────────────────────────────────────────────────────
 
+    def _session_archive(self, agent: Agent | None = None) -> SessionArchive:
+        """目前（或指定）agent 的 session archive。
+
+        每次依 history 檔路徑重建：狀態都在磁碟上，/cd 後自然對到新目錄。
+        """
+        return SessionArchive((agent or self.agent)._history_file)
+
     def _update_subtitle(self) -> None:
         display = self.agent.display_name
-        name = self.session.name
+        name = self._session_archive().name
         self.sub_title = f"{display} · {name}" if name else display
 
-    def _current_tab_id(self) -> str:
-        from textual.widgets import TabbedContent
-        try:
-            return self.query_one("#center-tabs", TabbedContent).active or "chat"
-        except Exception:
-            return "chat"
-
-    def _save_session_name_for_archive(self, archive: Path) -> None:
-        """把 session.name 寫入 .names.json，然後清除。"""
-        name = self.session.name
-        if name:
-            names_file = archive.parent / ".names.json"
-            try:
-                names: dict = json.loads(names_file.read_text(encoding="utf-8")) if names_file.exists() else {}
-                names[archive.name] = name
-                names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception:
-                logger.warning(f"無法儲存 session 名稱：{archive.name}")
-            self.session.name = ""
-            self.session.tab_names.pop(self._current_tab_id(), None)
-            self._update_subtitle()
-        # 名稱已歸入 .names.json，刪除暫存的 .current_name
-        try:
-            self._current_name_file().unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    def _load_session_name_from_archive(self, archive: Path) -> None:
-        """從 .names.json 讀取歸檔名稱並設入 session.name。"""
-        names_file = archive.parent / ".names.json"
-        try:
-            names: dict = json.loads(names_file.read_text(encoding="utf-8")) if names_file.exists() else {}
-            self.session.name = names.get(archive.name, "")
-        except Exception:
-            self.session.name = ""
-        self.session.tab_names[self._current_tab_id()] = self.session.name
-        self._update_subtitle()
-
-    def _current_name_file(self) -> Path:
-        """回傳目前 agent history 所在目錄下的 .history/.current_name 路徑。"""
-        return self.agent._history_file.resolve().parent / ".history" / ".current_name"
-
     def _do_rename(self, arg: str) -> None:
-        name = self.session.name
+        sa = self._session_archive()
         if not arg:
-            shown = name or "（未命名）"
+            shown = sa.name or "（未命名）"
             self.notify(f"目前 session 名稱：{shown}\n用法：/rename <名稱>", timeout=5)
             return
-        self.session.name = arg
-        self.session.tab_names[self._current_tab_id()] = arg
-        # 持久化名稱，讓重啟後也能還原
+        to_archive = sa.resumed_from is not None
         try:
-            _nf = self._current_name_file()
-            _nf.parent.mkdir(exist_ok=True)
-            _nf.write_text(arg, encoding="utf-8")
-        except Exception:
-            pass
+            sa.rename(arg)
+        except OSError as e:
+            self.notify(f"命名失敗：{e}", severity="error")
+            return
         self._update_subtitle()
-        self.notify(f"Session 命名為「{arg}」，歸檔時自動儲存", timeout=3)
+        hint = "已同步更新來源 archive" if to_archive else "歸檔時自動儲存"
+        self.notify(f"Session 命名為「{arg}」，{hint}", timeout=3)
 
     # ── /cls ─────────────────────────────────────────────────────────────────
 
@@ -208,31 +155,17 @@ class SessionMixin(_MixinBase):
         if not real_msgs:
             self.notify("沒有對話記錄，無需清除", severity="information", timeout=2)
             return
+        agent.save_history()  # 確保磁碟與記憶體一致後再封存
+        try:
+            result = self._session_archive(agent).close()
+        except OSError as e:
+            self.notify(f"歸檔失敗：{e}", severity="error")
+            return
         await msgs.remove_children()
-        hist_file = agent._history_file.resolve()
-        hist_dir = hist_file.parent / ".history"
-        if hist_file.exists() and self.session.resumed_from is None:
-            hist_dir.mkdir(exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive = hist_dir / f"history_{ts}.json"
-            n = 1
-            while archive.exists():  # 同秒多次 /cls 時避免覆蓋
-                archive = hist_dir / f"history_{ts}_{n}.json"
-                n += 1
-            hist_file.rename(archive)
-            self._save_session_name_for_archive(archive)
-            self.notify(f"歷史已歸檔至 {hist_dir.name}/{archive.name}", timeout=3)
-        elif self.session.resumed_from is not None:
-            hist_file.unlink(missing_ok=True)
-            self.session.name = ""
-            self.session.tab_names.pop(self._current_tab_id(), None)
-            try:
-                self._current_name_file().unlink(missing_ok=True)
-            except Exception:
-                pass
+        if result.kind == "archived" and result.archive is not None:
+            self.notify(f"歷史已歸檔至 .history/{result.archive.name}", timeout=3)
+        elif result.kind == "discarded":
             self.notify("已清除（resume 後未新增對話，不重複歸檔）", timeout=3)
-        self.session.resumed_from = None
-        self.session.tab_resumed_from.pop(self._current_tab_id(), None)
         agent.history = []
         agent._rebuild_system_prompt()
         agent.save_history()
@@ -241,90 +174,51 @@ class SessionMixin(_MixinBase):
         self._update_subtitle()
         self.query_one("#file-tree", FileTree).refresh_tree()
 
+    # ── /resume ──────────────────────────────────────────────────────────────
+
     async def _handle_resume(self, arg: str) -> None:
         from widgets.resume import ResumeScreen
-        hist_dir = self.agent._history_file.resolve().parent / ".history"
-        archives = sorted(hist_dir.glob("history_*.json"), reverse=True) if hist_dir.exists() else []
-        if not archives:
+        sa = self._session_archive()
+        entries = sa.list_archives()
+        if not entries:
             self.notify("沒有任何歸檔 session", severity="warning")
             return
         if arg:
             try:
                 idx = int(arg) - 1
-                archive = archives[idx]
+                if idx < 0:
+                    raise IndexError
+                archive = entries[idx].path
             except (ValueError, IndexError):
-                self.notify(f"編號無效，共 {len(archives)} 個歸檔", severity="error")
+                self.notify(f"編號無效，共 {len(entries)} 個歸檔", severity="error")
                 return
             await self._resume_load(archive)
             return
 
-        names_file = hist_dir / ".names.json"
-        entries = []
-        for p in archives:
-            try:
-                msgs_data = json.loads(p.read_text(encoding="utf-8"))
-                user_msgs = [m for m in msgs_data if m.get("role") == "user"]
-                count = len(user_msgs)
-                last = user_msgs[-1]["content"] if user_msgs else ""
-                if isinstance(last, list):
-                    last = next((b["text"] for b in last if b.get("type") == "text"), "")
-                preview = str(last)[:50].replace("\n", " ")
-                stem = p.stem
-                try:
-                    dt = stem[8:]
-                    ts = f"{dt[:4]}-{dt[4:6]}-{dt[6:8]} {dt[9:11]}:{dt[11:13]}"
-                except Exception:
-                    ts = stem
-            except Exception:
-                logger.warning(f"resume: 無法解析歸檔 {p.name}")
-                count, preview, ts = 0, "(無法讀取)", p.name
-            entries.append({"ts": ts, "count": count, "preview": preview})
+        async def _on_result(archive: Path | None) -> None:
+            if archive is not None:
+                await self._resume_load(archive)
 
-        async def _on_result(idx: int | None) -> None:
-            if idx is not None:
-                await self._resume_load(archives[idx])
-
-        self.push_screen(ResumeScreen(entries, archives, names_file, self.session.resumed_from), _on_result)
+        self.push_screen(ResumeScreen(sa), _on_result)
 
     async def _resume_load(self, archive: Path) -> None:
-        # 切換前先處理當前 session
-        real_msgs = [m for m in self.agent.history if m.get("role") != "system"]
-        hist_file = self.agent._history_file.resolve()
-        hist_dir = hist_file.parent / ".history"
-        if real_msgs and self.session.resumed_from is None and hist_file.exists():
-            # 有新訊息且非 resume 狀態 → 自動歸檔，避免切換時遺失
-            hist_dir.mkdir(exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            auto_arch = hist_dir / f"history_{ts}.json"
-            n = 1
-            while auto_arch.exists():
-                auto_arch = hist_dir / f"history_{ts}_{n}.json"
-                n += 1
-            hist_file.rename(auto_arch)
-            self._save_session_name_for_archive(auto_arch)
-            self.notify(f"已自動歸檔：{auto_arch.name}", timeout=3)
-        elif self.session.resumed_from is not None and hist_file.exists():
-            # resume 後未新增訊息直接切換 → 刪除，不重複歸檔
-            hist_file.unlink(missing_ok=True)
-            self.session.name = ""
-
+        agent = self.agent
+        sa = self._session_archive(agent)
+        agent.save_history()  # 確保磁碟與記憶體一致後再切換
         try:
-            shutil.copy2(archive, self.agent._history_file)
-        except Exception as e:
+            result = sa.resume(archive)
+        except OSError as e:
             self.notify(f"載入失敗：{e}", severity="error")
             return
-        # 持久化 resume 狀態，讓重開 app 後仍知道 history.json 是 resume 來的
-        state_file = self.agent._history_file.resolve().parent / ".history" / ".resumed_from"
-        state_file.parent.mkdir(exist_ok=True)
-        state_file.write_text(archive.name, encoding="utf-8")
+        if result.kind == "archived" and result.archive is not None:
+            self.notify(f"已自動歸檔：{result.archive.name}", timeout=3)
         msgs = self._active_msgs()
         await msgs.remove_children()
-        self.agent.reset_history()
-        await self._render_history_into(msgs, self.agent)
-        self.session.resumed_from = archive
-        self.session.tab_resumed_from[self._current_tab_id()] = archive
-        self._load_session_name_from_archive(archive)
-        name_display = self.session.name or archive.name
+        agent.reset_history()
+        await self._render_history_into(msgs, agent)
+        self.agent = agent
+        self._update_subtitle()
+        name_display = sa.name or archive.name
         self.notify(f"已載入：{name_display}（有新對話後才會重新歸檔）", timeout=4)
 
     async def action_switch_model(self, model_name: str) -> None:
