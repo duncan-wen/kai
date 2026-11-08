@@ -811,8 +811,21 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         檔案 tab 不改變作用中的 Agent。
         """
         tab_id = self.query_one("#center-tabs", TabbedContent).active
-        if tab_id and self.agents.activate(tab_id):
+        if not tab_id:
+            return
+        if self.agents.activate(tab_id):
             self._sync_active_agent_ui()
+        # 根據新 tab 是否正在串流，恢復或保持 prompt 鎖定狀態
+        # （_send 結束時若使用者已不在原 tab，解鎖交給這裡）
+        prompt = self.query_one("#prompt", HistoryInput)
+        if tab_id in self.tab_state.streaming_tabs:
+            prompt.disabled = True
+            prompt.add_class("streaming")
+        else:
+            prompt.disabled = False
+            prompt.remove_class("streaming")
+            self._update_prompt_title()
+            prompt.focus()
 
     def _switch_to_tab(self, tab_id: str) -> None:
         """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
