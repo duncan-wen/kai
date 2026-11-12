@@ -288,6 +288,65 @@ def _load_kokoro() -> Any:
 
 
 _KOKORO_MAX_CHARS = 400  # CPU inference 每 100 字約 5-8s，限制避免等太久
+# 每段送進 kokoro 的字數上限，必須遠低於 kokoro-onnx 的 510 音素上限
+# （kokoro-onnx 截到剛好 510 時會 voice[510] 越界，必須自己先切小）
+# 英文約 1 字 ≈ 1 音素；中日韓文字 1 字約 3-4 音素，因此用較小的上限
+_KOKORO_CHUNK_CHARS = 200
+_KOKORO_CHUNK_CHARS_CJK = 80
+
+# 中日韓文字（含全形標點、注音、假名）
+_CJK_RE = re.compile(
+    r"[　-〿぀-ヿ㄀-ㄯ㐀-䶿一-鿿"
+    r"豈-﫿＀-￯]+"
+)
+# IPA 音標與修飾符號：英文 espeak 念出來是亂碼，一併移除
+_IPA_RE = re.compile(r"\S*[\u0250-\u02FF\u1D00-\u1DBF]\S*")  # 含 IPA 的整個詞
+
+
+def _english_only(text: str) -> str:
+    """移除中日韓文字與 IPA，只保留英文部分；被移除的中文段落視為句子邊界。"""
+    text = _CJK_RE.sub(". ", text)
+    text = _IPA_RE.sub("", text)
+    # 清掉移除後殘留的空括號與孤立符號
+    text = re.sub(r"[\(\[\{]\s*[.,;:\s]*[\)\]\}]", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    # 每行收斂：連續標點（". . ," 之類）合併成一個；只去掉行首條列符號與孤立破折號，
+    # 不動緊貼文字的 "-"（如 "-5 degrees"）
+    lines = []
+    for line in text.splitlines():
+        line = re.sub(r"\s*([.,;:!?])(\s*[.,;:!?])+", r"\1", line)
+        line = re.sub(r"^[\s.,;:!?]+|[\s,;:]+$", "", line)
+        line = re.sub(r"^[-–—*•]\s+|\s+[-–—]+\s*$", "", line).strip()
+        if re.search(r"[A-Za-z]", line):
+            lines.append(line if line[-1] in ".!?" else f"{line}.")
+    return "\n".join(lines)
+
+
+def _chunk_text(text: str, max_chars: int = _KOKORO_CHUNK_CHARS) -> list[str]:
+    """依句子切段，每段不超過 max_chars；過長的單句再依空白切。"""
+    sentences = [
+        s.strip() for s in re.split(r"(?<=[.!?;:])\s+|(?<=[。！？；])|\n+", text) if s.strip()
+    ]
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        while len(sentence) > max_chars:
+            cut = sentence.rfind(" ", 0, max_chars)
+            if cut <= 0:
+                cut = max_chars
+            head, sentence = sentence[:cut].strip(), sentence[cut:].strip()
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(head)
+        if current and len(current) + len(sentence) + 1 > max_chars:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 async def _speak_kokoro(
@@ -303,13 +362,36 @@ async def _speak_kokoro(
         logger.warning("tts: soundfile 未安裝：uv sync --extra tts")
         return
 
+    is_english = lang.lower().startswith("en")
+    if is_english:
+        # 英文發音引擎念中文會產生超長音素串並觸發 kokoro-onnx 越界錯誤，只念英文部分
+        orig_len = len(text)
+        text = _english_only(text)
+        if not text:
+            logger.info("tts kokoro: 去除中文後沒有英文內容，略過")
+            return
+        if len(text) != orig_len:
+            logger.debug(f"tts kokoro: 只保留英文 {orig_len} → {len(text)} 字")
+
     if len(text) > _KOKORO_MAX_CHARS:
         logger.info(f"tts kokoro: 截斷 {len(text)} → {_KOKORO_MAX_CHARS} 字")
         text = text[:_KOKORO_MAX_CHARS].rsplit(" ", 1)[0]  # 在空白處截斷避免斷字
 
+    chunks = _chunk_text(text, _KOKORO_CHUNK_CHARS if is_english else _KOKORO_CHUNK_CHARS_CJK)
+    if not chunks:
+        logger.info("tts kokoro: 沒有可念的內容，略過")
+        return
+
     def _generate() -> tuple[Any, int]:
+        import numpy as np
+
         kokoro = _load_kokoro()
-        return kokoro.create(text, voice=voice, speed=1.0, lang=lang)
+        parts: list[Any] = []
+        sample_rate = 24000
+        for chunk in chunks:
+            samples, sample_rate = kokoro.create(chunk, voice=voice, speed=1.0, lang=lang)
+            parts.append(samples)
+        return np.concatenate(parts), sample_rate
 
     logger.info(f"tts kokoro generating: {len(text)} chars")
     _t0 = asyncio.get_event_loop().time()
