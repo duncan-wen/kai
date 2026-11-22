@@ -237,6 +237,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             ("/mcp-reload", "重新載入 MCP servers（不需重啟）"),
             ("/mcp-add", "新增 MCP server  /mcp-add <name> <cmd> [args...]  或  /mcp-add <name> --url <url>"),
             ("/mcp-del", "移除 MCP server  /mcp-del <name>"),
+            ("/skills", "列出所有可用 skill 與觸發時機"),
             ("/rename", "命名目前 session  /rename <名稱>"),
             ("/nickname", "查詢或設定目前模型的暱稱  /nickname [名字]"),
             ("/create-agent", "用 AI 設計新 agent  /create-agent [--global] <描述>"),
@@ -570,6 +571,8 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 await self._do_mcp_add(arg)
             elif cmd == "/mcp-del":
                 await self._do_mcp_del(arg)
+            elif cmd == "/skills":
+                await self._do_skills_list()
             elif cmd == "/rename":
                 self._do_rename(arg)
             elif cmd == "/nickname":
