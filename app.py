@@ -33,6 +33,7 @@ import core.config as _kai_cfg
 from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
 from core.mcp_client import MCPClient, load_mcp_servers
 from core.models import REGISTRY
+from core.skills import discover_skills
 from mixins.agents import AgentsMixin
 from mixins.app_tools import AppToolsMixin
 from mixins.bash import BashMixin
@@ -258,6 +259,7 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         self._sync_cap_bar()
         self.set_interval(15, lambda: self.query_one("#sidebar", Sidebar).refresh_git())
         self._mcp_done = asyncio.Event()
+        self._refresh_skills_sidebar()
         self._mcp_task = asyncio.get_event_loop().create_task(self._mcp_lifecycle())
 
     @work
@@ -840,8 +842,15 @@ class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, Str
         prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
         sidebar.set_model(self.agent.profile.name)
         sidebar.set_mcp(self.agent.mcp_client.server_summary if self.agent.mcp_client else {})
+        self._refresh_skills_sidebar()
         self._update_subtitle()
         self._sync_cap_bar()
+
+    def _refresh_skills_sidebar(self) -> None:
+        """把目前 cwd 可用的 skills 同步到側邊欄。"""
+        self.query_one("#sidebar", Sidebar).set_skills(
+            [s.name for s in discover_skills()]
+        )
 
     def on_file_tree_file_chosen(self, event: FileTree.FileChosen) -> None:
         path = event.path

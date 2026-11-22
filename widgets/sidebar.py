@@ -73,6 +73,13 @@ class Sidebar(Widget):
             id="sb-mcp",
             markup=True,
         )
+        yield Static("🧩 Skills", classes="sidebar-title", markup=True)
+        yield Static(
+            "[dim]掃描中...[/dim]",
+            classes="sidebar-content",
+            id="sb-skills",
+            markup=True,
+        )
 
     def on_mount(self) -> None:
         self._refresh_git_worker()
@@ -124,5 +131,15 @@ class Sidebar(Widget):
             text = "[dim]未啟用[/dim]"
         try:
             self.query_one("#sb-mcp", Static).update(text)
+        except Exception:
+            pass
+
+    def set_skills(self, names: list[str]) -> None:
+        if names:
+            text = f"[dim]{len(names)} 個[/dim]  " + "、".join(names)
+        else:
+            text = "[dim]未啟用[/dim]"
+        try:
+            self.query_one("#sb-skills", Static).update(text)
         except Exception:
             pass

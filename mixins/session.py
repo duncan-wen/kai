@@ -92,6 +92,7 @@ class SessionMixin(_MixinBase):
         self.query_one("#sb-cwd", Static).update(str(target))
         self.query_one("#file-tree", FileTree).refresh_tree()
         self.agent.reset_history()
+        self._refresh_skills_sidebar()
         await self.query_one("#messages", VerticalScroll).remove_children()
         self._render_history()
         self._update_subtitle()

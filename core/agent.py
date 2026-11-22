@@ -20,6 +20,7 @@ from .config import (
     HISTORY_KEEP,
     get_nickname,
 )
+from .skills import skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .tools import (
@@ -128,6 +129,7 @@ class Agent:
         """重建 history[0] system message（日期、cwd、MCP context 每次都可能變）。
         若有 _custom_system_prompt（agent factory 建立的 agent），直接使用，不走通用邏輯。
         """
+        skills_idx = skills_index_text()
         if self._custom_system_prompt is not None:
             notes_root = self._agent_dir if self._agent_dir else Path(os.getcwd()) / ".kai"
             notes_path = notes_root / "notes.md"
@@ -137,6 +139,8 @@ class Agent:
             content = date_line + self._resolve_prompt(self._custom_system_prompt, notes_root)
             if notes:
                 content += f"\n\n## 📝 專案記憶\n{notes}\n\n以上規則必須嚴格遵守。"
+            if skills_idx:
+                content += f"\n\n## 🧩 可用技能（Skills）\n{skills_idx}"
             if self.extra_tools_note:
                 content += self.extra_tools_note
             msg = {"role": "system", "content": content}
@@ -237,6 +241,8 @@ class Agent:
                 )
             ),
         }
+        if skills_idx:
+            system_msg["content"] += f"\n\n## 🧩 可用技能（Skills）\n{skills_idx}"
         if self.extra_tools_note:
             system_msg["content"] += self.extra_tools_note
         if self.history and self.history[0]["role"] == "system":

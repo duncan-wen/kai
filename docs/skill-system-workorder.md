@@ -25,11 +25,11 @@
 
 ## 階段 1：顯示層（system prompt 索引 + 側邊欄）
 
-- [ ] `core/agent.py::_rebuild_system_prompt` 注入「可用技能」索引（只放名稱+描述）
-- [ ] `widgets/sidebar.py`
+- [x] `core/agent.py::_rebuild_system_prompt` 注入「可用技能」索引（只放名稱+描述）
+- [x] `widgets/sidebar.py`
   - `compose()` 加 `🧩 Skills` 標題 + `#sb-skills` 內容區
   - 新增 `set_skills(names: list[str])`，顯示「個數 + 名稱」
-- [ ] `app.py`：在更新 MCP 的同一批位置呼叫 `set_skills`（連線完成 / 切 tab / cd）
+- [x] `app.py`：在更新 MCP 的同一批位置呼叫 `set_skills`（連線完成 / 切 tab / cd）
 
 **驗收**：側邊欄顯示 `🧩 Skills  N 個（name1、name2）`；新對話 system prompt 含技能索引。
 
@@ -71,6 +71,6 @@
 | 階段 | 狀態 |
 |------|------|
 | 0 掃描器 | ✅ 完成 |
-| 1 顯示層 | ⬜ 未開始 |
+| 1 顯示層 | ✅ 完成 |
 | 2 互動層 | ⬜ 未開始 |
 | 3 能力層 | ⬜ 未開始 |
