@@ -667,29 +667,30 @@ class Agent:
                     self.history.pop()
                 return
 
-            for tc, (fn_name, result) in zip(tool_calls, results):
+            for tc, tr in zip(tool_calls, results):
                 raw = getattr(tc.function, "arguments", {})
                 args = json.loads(raw) if isinstance(raw, str) else dict(raw)
-                log_tool_call(fn_name, args, result, self._agent_dir)
+                log_tool_call(tr.fn_name, args, tr.output, self._agent_dir)
                 if on_tool_call:
-                    await on_tool_call(fn_name, args, result)
-            for _fn, _ in results:
-                _tool_call_log.append(_fn)
+                    # 傳結構化 ToolResult，顯示層不再掃字串猜錯誤
+                    await on_tool_call(tr.fn_name, args, tr)
+            for tr in results:
+                _tool_call_log.append(tr.fn_name)
 
             # Tool result messages (format differs by backend)
             if self.profile.backend in ("gemini", "deepseek"):
-                for tc, (fn_name, result) in zip(tool_calls, results):
+                for tc, tr in zip(tool_calls, results):
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": self._trim_tool_result(result),
+                        "content": self._trim_tool_result(tr.output),
                     })
             else:
-                for fn_name, result in results:
+                for tr in results:
                     messages.append({
                         "role": "tool",
-                        "content": self._trim_tool_result(result),
-                        "name": fn_name,
+                        "content": self._trim_tool_result(tr.output),
+                        "name": tr.fn_name,
                     })
 
             tool_call_count += 1

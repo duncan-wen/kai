@@ -1,6 +1,7 @@
 from loguru import logger
 from pydantic import ValidationError
 
+from .result import ToolResult
 from .web import WebSearchArgs
 
 OPEN_AGENT_TOOL = {
@@ -43,8 +44,11 @@ def _mask_args(raw) -> dict:
 SUBAGENT_DISPATCH_TOOLS = {"send_to_agent"}
 
 
-async def run_tool(tc, tools_map: dict, mcp_client=None) -> tuple[str, str]:
-    """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。"""
+async def run_tool(tc, tools_map: dict, mcp_client=None) -> ToolResult:
+    """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。
+
+    回傳結構化的 :class:`ToolResult`，呼叫端不需再靠字串關鍵字判斷錯誤。
+    """
     import json
 
     fn_name = tc.function.name
@@ -56,32 +60,36 @@ async def run_tool(tc, tools_map: dict, mcp_client=None) -> tuple[str, str]:
 
         subagent = str(raw.get("name", "unknown")) if isinstance(raw, dict) else "unknown"
         with agent(name=f"agent:{subagent}", input={"args": _mask_args(raw)}) as a:
-            fn, result = await _dispatch(fn_name, raw, tools_map, mcp_client)
+            tr = await _dispatch(fn_name, raw, tools_map, mcp_client)
             if a is not None:
-                a.update(output={"result": str(result)[:1000]})
-            return fn, result
+                a.update(output={"result": tr.output[:1000]})
+            return tr
 
     from ..langfuse_client import tool
 
     with tool(name=fn_name, input={"args": _mask_args(raw)}) as t:
-        fn, result = await _dispatch(fn_name, raw, tools_map, mcp_client)
+        tr = await _dispatch(fn_name, raw, tools_map, mcp_client)
         if t is not None:
-            t.update(output={"result": str(result)[:1000]})
-        return fn, result
+            t.update(output={"result": tr.output[:1000]})
+        return tr
 
 
-async def _dispatch(fn_name: str, raw: dict, tools_map: dict, mcp_client) -> tuple[str, str]:
-    """實際分發邏輯（不含追蹤）。"""
+async def _dispatch(fn_name: str, raw: dict, tools_map: dict, mcp_client) -> ToolResult:
+    """實際分發邏輯（不含追蹤）。
+
+    錯誤一律以結構化旗標回報，不再依賴輸出字串內容。
+    工具若自行回傳 :class:`ToolResult`（例如 bash_exec 帶 exit code），原樣透傳。
+    """
     if mcp_client and fn_name in mcp_client.tool_names:
         try:
             result = await mcp_client.call(fn_name, raw)
-            return fn_name, result
+            return ToolResult(fn_name, result)
         except Exception as e:
             logger.error(f"MCP tool '{fn_name}' 呼叫失敗：{e}")
-            return fn_name, f"[MCP Error] {e}"
+            return ToolResult(fn_name, f"[MCP Error] {e}", is_error=True)
 
     if fn_name not in tools_map:
-        return fn_name, f"[Error] 未知工具：{fn_name}"
+        return ToolResult(fn_name, f"[Error] 未知工具：{fn_name}", is_error=True)
 
     fn = tools_map[fn_name]
     if fn_name == "web_search":
@@ -90,7 +98,19 @@ async def _dispatch(fn_name: str, raw: dict, tools_map: dict, mcp_client) -> tup
         except ValidationError as e:
             error_msg = f"[ValidationError] {e.error_count()} 個錯誤:\n{e}"
             logger.warning(f"tool call 參數校驗失敗：{error_msg}")
-            return fn_name, error_msg
-        return fn_name, await fn(args.query, args.num_results)
+            return ToolResult(fn_name, error_msg, is_error=True)
+        try:
+            return ToolResult(fn_name, await fn(args.query, args.num_results))
+        except Exception as e:
+            logger.error(f"tool '{fn_name}' 執行例外：{e}")
+            return ToolResult(fn_name, f"[Error] {e}", is_error=True)
 
-    return fn_name, await fn(**raw)
+    try:
+        out = await fn(**raw)
+    except Exception as e:
+        logger.error(f"tool '{fn_name}' 執行例外：{e}")
+        return ToolResult(fn_name, f"[Error] {e}", is_error=True)
+
+    if isinstance(out, ToolResult):
+        return out
+    return ToolResult(fn_name, str(out))

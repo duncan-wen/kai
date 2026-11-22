@@ -1,6 +1,6 @@
 # Issue: tool call debug display 用字串關鍵字比對判斷錯誤，存在誤判缺陷
 
-> 狀態：待處理　|　優先序：中　|　建立：2026-11-23
+> 狀態：✅ 已修復（2026-11-23，分支 `fix/tool-result-structured`）　|　優先序：中　|　建立：2026-11-23
 
 ## 問題描述
 
@@ -35,6 +35,31 @@
 - `mixins/streaming.py`（`on_tool_call`，line 165 起；`_ERR_PREFIXES` line 173）
 - `mixins/agents.py`（`on_tool_call`，line 212 起；`_ERR` line 220）
 - `core/agent.py`（`on_tool_call` 呼叫點，line 616-618）
+
+## ✅ 修復紀錄（2026-11-23）
+
+改為**結構化旗標**回報，完全移除顯示層的字串關鍵字掃描。
+
+### 新增
+- `core/tools/result.py`：`ToolResult(fn_name, output, is_error, exit_code)` dataclass，
+  `is_warn` 為 property（`not is_error and exit_code == 1`），`__str__` 回傳 output 保持字串相容。
+
+### 改動
+| 檔案 | 改動 |
+|---|---|
+| `core/tools/bash.py` | `bash_exec` 回傳 `ToolResult`，帶 `exit_code`；`>= 2` → `is_error`，`== 1` → `is_warn` |
+| `core/tools/dispatch.py` | `_dispatch` / `run_tool` 回傳 `ToolResult`；工具自行回傳 `ToolResult` 則透傳；**所有工具例外統一包成 `is_error=True`**（修掉原本漏判） |
+| `core/agent.py` | 呼叫點改吃 `ToolResult`，`on_tool_call(name, args, tr)` 傳物件；tool message 用 `tr.output` |
+| `mixins/streaming.py` | 移除 `_ERR_PREFIXES` 與 exit code regex，改讀 `tr.is_error` / `tr.is_warn` |
+| `mixins/agents.py` | 移除 `_ERR` 字串掃描，改讀 `tr.is_error` / `tr.is_warn`，**補上 ⚠️ 警告級**（兩路徑語意統一） |
+| `core/tools/__init__.py` | 匯出 `ToolResult` |
+
+### 驗證
+- `tests/test_tool_result.py` 新增 15 個測試，含三個關鍵回歸：
+  1. 成功輸出含 `Traceback (most recent call last)` → **不再**判為錯誤
+  2. 成功輸出含 `[Error]` / `[stderr]` / `[MCP Error]` 字樣 → **不再**判為錯誤
+  3. `exit 3`（無任何關鍵字）→ 正確判為錯誤
+- 全套 `uv run pytest`：131 passed；`ruff check`：All checks passed
 
 ## 備註
 

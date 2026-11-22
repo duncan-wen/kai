@@ -4,6 +4,7 @@ import re
 from loguru import logger
 
 from .. import config as _cfg
+from .result import ToolResult
 
 BASH_TOOL = {
     "type": "function",
@@ -40,8 +41,8 @@ def clean_thinking(text: str) -> str:
     return CLEAN_PATTERN.sub("", text)
 
 
-async def bash_exec(command: str, timeout: int = 0) -> str:
-    """執行 bash 指令，回傳 stdout + stderr。"""
+async def bash_exec(command: str, timeout: int = 0) -> ToolResult:
+    """執行 bash 指令，回傳結構化結果（stdout + stderr 與 exit code）。"""
     t = timeout or _cfg.BASH_TIMEOUT
 
     async def _collect(reader: asyncio.StreamReader, chunks: list[bytes]) -> None:
@@ -75,7 +76,7 @@ async def bash_exec(command: str, timeout: int = 0) -> str:
 
         if timed_out:
             logger.debug(f"bash_exec timeout {t}s: {command[:60]}")
-            return f"[Error] 逾時 {t}s"
+            return ToolResult("bash_exec", f"[Error] 逾時 {t}s", is_error=True)
 
         out = b"".join(out_chunks).decode(errors="replace").strip()
         err = b"".join(err_chunks).decode(errors="replace").strip()
@@ -88,7 +89,13 @@ async def bash_exec(command: str, timeout: int = 0) -> str:
         logger.debug(f"bash_exec exit={proc.returncode}: {command[:60]}")
         if proc.returncode != 0:
             result = f"[exit code {proc.returncode}]\n{result}"
-        return result
+        # exit code 語意：>= 2 視為錯誤、== 1 視為警告（有輸出但不致命）
+        return ToolResult(
+            "bash_exec",
+            result,
+            is_error=proc.returncode >= 2,
+            exit_code=proc.returncode,
+        )
 
     except Exception as e:
-        return f"[Error] {e}"
+        return ToolResult("bash_exec", f"[Error] {e}", is_error=True)

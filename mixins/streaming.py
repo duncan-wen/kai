@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app import ChatApp as _MixinBase
+    from core.tools.result import ToolResult
 else:
     _MixinBase = object  # type: ignore[assignment,misc]
 
@@ -162,7 +163,7 @@ class StreamingMixin(_MixinBase):
                         speak(_display, **_tts_kw), get_tts_loop()
                     )
 
-            async def on_tool_call(name: str, args: dict, result: str) -> None:
+            async def on_tool_call(name: str, args: dict, tr: "ToolResult") -> None:
                 nonlocal stream_msg, buf
                 self.ui_state.spin_label = "工具回應中"
                 if stream_msg and buf:
@@ -170,11 +171,11 @@ class StreamingMixin(_MixinBase):
                     await stream_msg.update_content(_pre, final=True)
                 stream_msg = None
                 buf.clear()
-                _ERR_PREFIXES = ("[MCP Error]", "[Error]", "[ValidationError]", "[stderr]", "Traceback (most recent call last)")
-                _exit_m = re.search(r"\[exit code (\d+)\]", result)
-                _exit_code = int(_exit_m.group(1)) if _exit_m else 0
-                is_err = _exit_code >= 2 or any(kw in result for kw in _ERR_PREFIXES)
-                is_warn = not is_err and _exit_code == 1
+                # 錯誤判定完全來自分發層的結構化旗標，不再掃描輸出字串
+                # （避免回傳程式碼含 "Traceback" 字樣被誤塗紅）
+                result = tr.output
+                is_err = tr.is_error
+                is_warn = tr.is_warn
                 _FS_MUTATING = {"write_file", "create_directory", "move_file", "delete_file", "edit_file"}
                 if not is_err and not is_warn and name in _FS_MUTATING:
                     self.query_one("#file-tree", FileTree).refresh_tree()

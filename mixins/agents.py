@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app import AgentMessage, ChatApp as _MixinBase
     from core.agent_factory import AgentDefinition
+    from core.tools.result import ToolResult
 else:
     _MixinBase = object  # type: ignore[assignment,misc]
 
@@ -209,7 +210,7 @@ class AgentsMixin(_MixinBase):
             display = str(hist[-1]["content"]) if hist and hist[-1]["role"] == "assistant" else "".join(buf)
             await stream_msg.update_content(display, final=True)
 
-        async def on_tool_call(name: str, args: dict, result: str) -> None:
+        async def on_tool_call(name: str, args: dict, tr: "ToolResult") -> None:
             nonlocal _spin_label, stream_msg, buf
             _spin_label = "工具回應中"
             if stream_msg and buf:
@@ -217,9 +218,10 @@ class AgentsMixin(_MixinBase):
                 await stream_msg.update_content(_pre, final=True)
                 stream_msg = None
                 buf.clear()
-            _ERR = ("[MCP Error]", "[Error]", "[ValidationError]", "[stderr]", "Traceback")
-            is_err = any(kw in result for kw in _ERR)
-            icon = "❌" if is_err else "🔧"
+            # 與 streaming 路徑一致：吃結構化旗標（含 exit code 警告級），不掃字串
+            result = tr.output
+            is_err = tr.is_error
+            icon = "❌" if is_err else ("⚠️" if tr.is_warn else "🔧")
             card_cls = "tool-debug tool-debug-error" if is_err else "tool-debug"
             if not self.ui_state.debug_tools:
                 if is_err:

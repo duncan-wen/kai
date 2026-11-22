@@ -2,6 +2,7 @@
 from .bash import BASH_TOOL, CLEAN_PATTERN, bash_exec, clean_thinking
 from .dify import DIFY_RETRIEVE_TOOL, dify_retrieve, fetch_dify_datasets
 from .dispatch import OPEN_AGENT_TOOL, run_tool
+from .result import ToolResult
 from .skills import LIST_SKILLS_TOOL, USE_SKILL_TOOL, list_skills, use_skill
 from .web import (
     FETCH_URLS_TOOL,
@@ -20,6 +21,7 @@ __all__ = [
     "LIST_SKILLS_TOOL",
     "OPEN_AGENT_TOOL",
     "SEARCH_TOOL",
+    "ToolResult",
     "USE_SKILL_TOOL",
     "WebSearchArgs",
     "bash_exec",
