@@ -59,6 +59,9 @@ REGISTRY: list[ConfigEntry] = [
     ConfigEntry("azure_tts_region",      "AZURE_TTS_REGION",      "", str, "—", "Azure region（例如 eastasia）",  api_key=True),
     ConfigEntry("azure_tts_endpoint",    "AZURE_TTS_ENDPOINT",    "", str, "—", "自訂 Azure TTS endpoint",       api_key=True),
     ConfigEntry("dify_api_key",          "DIFY_API_KEY",          "", str, "—", "Dify Knowledge Base API key",   api_key=True),
+    ConfigEntry("langfuse_public_key",  "LANGFUSE_PUBLIC_KEY",  "", str, "—", "Langfuse public key",           api_key=True),
+    ConfigEntry("langfuse_secret_key",  "LANGFUSE_SECRET_KEY",  "", str, "—", "Langfuse secret key",           api_key=True),
+    ConfigEntry("langfuse_base_url",    "LANGFUSE_BASE_URL",    "", str, "—", "Langfuse base URL（預設 cloud）", api_key=True),
 ]
 
 # 快速查詢用

@@ -23,6 +23,7 @@ from .config import (
 from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
+from .langfuse_client import trace, generation
 from .tools import (
     BASH_TOOL,
     DIFY_RETRIEVE_TOOL,
@@ -414,12 +415,26 @@ class Agent:
             _cfg.COMPACT_MODEL
             or ("deepseek-v4-flash" if not self._gemini and self._deepseek else "gemini-2.5-flash")
         )
-        resp = await _compact_client.chat.completions.create(
+        with generation(
+            name="compact-history",
             model=_compact_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        summary = resp.choices[0].message.content or ""
+            input={"conversation": conversation[:1500]},
+        ) as _gen:
+            resp = await _compact_client.chat.completions.create(
+                model=_compact_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            summary = resp.choices[0].message.content or ""
+            if _gen is not None:
+                _usage = resp.usage
+                _gen.update(
+                    output={"summary": (summary or "")[:1000]},
+                    usage_details={
+                        "input": getattr(_usage, "prompt_tokens", 0) or 0,
+                        "output": getattr(_usage, "completion_tokens", 0) or 0,
+                    } if _usage is not None else None,
+                )
 
         system = [m for m in self.history if m["role"] == "system"]
         self.history = system + [{"role": "assistant", "content": f"[對話摘要]\n{summary}"}]
@@ -449,13 +464,35 @@ class Agent:
     async def chat(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """單輪對話；turn 中途要求的換模型在 turn 結束後才生效。"""
         self._in_turn = True
-        try:
-            return await self._run_turn(user_msg, on_token, on_thinking, on_done, on_tool_call, on_retry)
-        finally:
-            self._in_turn = False
-            if self._pending_model:
-                model, self._pending_model = self._pending_model, None
-                self._apply_model(model)
+        _user_text = user_msg.get("content") if isinstance(user_msg, dict) else ""
+        if isinstance(_user_text, list):
+            _user_text = " ".join(
+                b.get("text", "")
+                for b in _user_text
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        session_id = self._history_file.stem if self._history_file else None
+        with trace(
+            name="chat-turn",
+            session_id=session_id,
+            input={"user": str(_user_text or "")[:1000]},
+            metadata={
+                "model": self.profile.name,
+                "backend": self.profile.backend,
+                "agent": self.display_name,
+            },
+        ) as _span:
+            try:
+                return await self._run_turn(user_msg, on_token, on_thinking, on_done, on_tool_call, on_retry)
+            finally:
+                self._in_turn = False
+                if self._pending_model:
+                    model, self._pending_model = self._pending_model, None
+                    self._apply_model(model)
+                if _span is not None:
+                    _last = self.history[-1] if self.history else None
+                    if _last and _last.get("role") == "assistant":
+                        _span.update(output={"reply": str(_last.get("content") or "")[:1000]})
 
     async def _run_turn(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """

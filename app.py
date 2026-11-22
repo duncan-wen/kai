@@ -379,6 +379,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 os.killpg(os.getpgid(self._bash_proc.pid), signal.SIGTERM)
             except ProcessLookupError:
                 pass
+        # 退出前 flush Langfuse 待上傳的 span，避免 TUI 關閉掉資料
+        from core.langfuse_client import flush
+        flush()
         self.exit()
 
     # ── 輸入事件 ──────────────────────────────────────────────────────────────

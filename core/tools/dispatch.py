@@ -26,14 +26,38 @@ OPEN_AGENT_TOOL = {
 }
 
 
+def _mask_args(raw) -> dict:
+    """遮罩敏感欄位，避免把 API key / token 等寫進追蹤。"""
+    if not isinstance(raw, dict):
+        return raw
+    masked = {}
+    for k, v in raw.items():
+        if any(s in str(k).lower() for s in ("key", "secret", "token", "password", "api")):
+            masked[k] = "***"
+        else:
+            masked[k] = v
+    return masked
+
+
 async def run_tool(tc, tools_map: dict, mcp_client=None) -> tuple[str, str]:
     """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。"""
     import json
+
+    from ..langfuse_client import tool
 
     fn_name = tc.function.name
     raw_args = tc.function.arguments
     raw = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
 
+    with tool(name=fn_name, input={"args": _mask_args(raw)}) as t:
+        fn, result = await _dispatch(fn_name, raw, tools_map, mcp_client)
+        if t is not None:
+            t.update(output={"result": str(result)[:1000]})
+        return fn, result
+
+
+async def _dispatch(fn_name: str, raw: dict, tools_map: dict, mcp_client) -> tuple[str, str]:
+    """實際分發邏輯（不含追蹤）。"""
     if mcp_client and fn_name in mcp_client.tool_names:
         try:
             result = await mcp_client.call(fn_name, raw)

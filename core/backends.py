@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from . import config as _cfg
 from .tools import clean_thinking
+from .langfuse_client import generation, trim_messages
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -46,6 +47,15 @@ def _to_openai_messages(messages: list[dict]) -> list[dict]:
     return result
 
 
+def _usage_details(usage) -> "dict | None":
+    """把 agent._last_usage (output, input) 轉成 Langfuse usage_details。"""
+    if not usage or usage[0] is None:
+        return None
+    out = usage[0] or 0
+    inp = usage[1] or 0
+    return {"input": inp, "output": out, "total": out + inp}
+
+
 async def stream_ollama(
     agent: "Agent",
     messages: list,
@@ -58,62 +68,74 @@ async def stream_ollama(
     on_retry,
 ) -> None:
     """Ollama 串流，含 XML 解析錯誤自動重試。"""
-    _xml_retry = 0
-    _XML_RETRY_MAX = 2
-    while True:
+    with generation(
+        name="llm-ollama",
+        model=agent.profile.name,
+        input={"messages": trim_messages(messages)},
+    ) as gen:
         try:
-            stream = await agent._ollama.chat(
-                model=agent.profile.name,
-                messages=messages,
-                think=agent.profile.supports_thinking,
-                tools=active_tools,
-                stream=True,
-                options={"num_ctx": agent.profile.num_ctx, "temperature": _cfg.TEMPERATURE, "top_k": _cfg.TOP_K, "top_p": _cfg.TOP_P},
-            )
-        except httpx.ConnectError:
-            raise
-
-        try:
-            _it = stream.__aiter__()
+            _xml_retry = 0
+            _XML_RETRY_MAX = 2
             while True:
                 try:
-                    chunk = await asyncio.wait_for(_it.__anext__(), timeout=_cfg.OLLAMA_STREAM_TIMEOUT)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    raise asyncio.TimeoutError(f"Ollama 超過 {_cfg.OLLAMA_STREAM_TIMEOUT}s 未回應，可能已卡住")
-                if agent._cancelled:
-                    break
-                msg = chunk.message
-                agent._last_usage = (getattr(chunk, "eval_count", None), getattr(chunk, "prompt_eval_count", None))
+                    stream = await agent._ollama.chat(
+                        model=agent.profile.name,
+                        messages=messages,
+                        think=agent.profile.supports_thinking,
+                        tools=active_tools,
+                        stream=True,
+                        options={"num_ctx": agent.profile.num_ctx, "temperature": _cfg.TEMPERATURE, "top_k": _cfg.TOP_K, "top_p": _cfg.TOP_P},
+                    )
+                except httpx.ConnectError:
+                    raise
 
-                if msg.thinking:
-                    thinking_parts.append(clean_thinking(msg.thinking))
+                try:
+                    _it = stream.__aiter__()
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(_it.__anext__(), timeout=_cfg.OLLAMA_STREAM_TIMEOUT)
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            raise asyncio.TimeoutError(f"Ollama 超過 {_cfg.OLLAMA_STREAM_TIMEOUT}s 未回應，可能已卡住")
+                        if agent._cancelled:
+                            break
+                        msg = chunk.message
+                        agent._last_usage = (getattr(chunk, "eval_count", None), getattr(chunk, "prompt_eval_count", None))
 
-                if msg.content:
-                    if not reply_parts and thinking_parts:
-                        agent._t_thinking_end = time.perf_counter()
-                        if on_thinking:
-                            await on_thinking("".join(thinking_parts))
-                    reply_parts.append(msg.content)
-                    if on_token:
-                        await on_token(msg.content)
+                        if msg.thinking:
+                            thinking_parts.append(clean_thinking(msg.thinking))
 
-                for tc in msg.tool_calls or []:
-                    tool_calls.append(tc)
-            return
+                        if msg.content:
+                            if not reply_parts and thinking_parts:
+                                agent._t_thinking_end = time.perf_counter()
+                                if on_thinking:
+                                    await on_thinking("".join(thinking_parts))
+                            reply_parts.append(msg.content)
+                            if on_token:
+                                await on_token(msg.content)
 
-        except ollama.ResponseError as e:
-            if "XML syntax error" in str(e) and _xml_retry < _XML_RETRY_MAX:
-                _xml_retry += 1
-                logger.warning(f"XML 解析錯誤，第 {_xml_retry}/{_XML_RETRY_MAX} 次重試：{e}")
-                reply_parts.clear()
-                tool_calls.clear()
-                thinking_parts.clear()
-                if on_retry:
-                    await on_retry()
-                continue
-            raise
+                        for tc in msg.tool_calls or []:
+                            tool_calls.append(tc)
+                    return
+
+                except ollama.ResponseError as e:
+                    if "XML syntax error" in str(e) and _xml_retry < _XML_RETRY_MAX:
+                        _xml_retry += 1
+                        logger.warning(f"XML 解析錯誤，第 {_xml_retry}/{_XML_RETRY_MAX} 次重試：{e}")
+                        reply_parts.clear()
+                        tool_calls.clear()
+                        thinking_parts.clear()
+                        if on_retry:
+                            await on_retry()
+                        continue
+                    raise
+        finally:
+            if gen is not None:
+                gen.update(
+                    output={"content": "".join(reply_parts)[:2000]},
+                    usage_details=_usage_details(agent._last_usage),
+                )
 
 
 async def stream_openai_compat(
@@ -129,73 +151,86 @@ async def stream_openai_compat(
 ) -> None:
     """OpenAI-compatible 串流（Gemini / DeepSeek）。"""
     from openai import NOT_GIVEN, RateLimitError
-    messages = _to_openai_messages(messages)
-    is_deepseek = agent.profile.backend == "deepseek"
-    extra: dict = {}
-    if is_deepseek and agent.profile.supports_thinking:
-        extra["extra_body"] = {"thinking": {"type": "enabled"}}
-        extra["reasoning_effort"] = "high"
-    elif is_deepseek:
-        extra["extra_body"] = {"thinking": {"type": "disabled"}}
-    try:
-        stream = await client.chat.completions.create(
-            model=agent.profile.name,
-            messages=messages,
-            tools=active_tools or NOT_GIVEN,
-            temperature=_cfg.TEMPERATURE,
-            top_p=_cfg.TOP_P,
-            stream=True,
-            stream_options={"include_usage": True},
-            **extra,
-        )
-    except RateLimitError as e:
-        logger.warning(f"API 配額不足（{agent.profile.backend}）：{e}")
-        raise RuntimeError(f"❌ API 配額已用盡，請稍後再試。\n{e}") from e
 
-    _tc_buf: dict[int, dict] = {}
+    with generation(
+        name="llm-openai-compat",
+        model=agent.profile.name,
+        input={"messages": trim_messages(messages)},
+    ) as gen:
+        try:
+            messages = _to_openai_messages(messages)
+            is_deepseek = agent.profile.backend == "deepseek"
+            extra: dict = {}
+            if is_deepseek and agent.profile.supports_thinking:
+                extra["extra_body"] = {"thinking": {"type": "enabled"}}
+                extra["reasoning_effort"] = "high"
+            elif is_deepseek:
+                extra["extra_body"] = {"thinking": {"type": "disabled"}}
+            try:
+                stream = await client.chat.completions.create(
+                    model=agent.profile.name,
+                    messages=messages,
+                    tools=active_tools or NOT_GIVEN,
+                    temperature=_cfg.TEMPERATURE,
+                    top_p=_cfg.TOP_P,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **extra,
+                )
+            except RateLimitError as e:
+                logger.warning(f"API 配額不足（{agent.profile.backend}）：{e}")
+                raise RuntimeError(f"❌ API 配額已用盡，請稍後再試。\n{e}") from e
 
-    async for chunk in stream:
-        if agent._cancelled:
-            break
-        if chunk.usage:
-            agent._last_usage = (chunk.usage.completion_tokens, chunk.usage.prompt_tokens)
-            hit = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
-            if hit is None and getattr(chunk.usage, "model_extra", None):
-                hit = chunk.usage.model_extra.get("prompt_cache_hit_tokens")
-            if hit is not None:
-                agent._last_cache_hit = hit
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
+            _tc_buf: dict[int, dict] = {}
 
-        reasoning = getattr(delta, "reasoning_content", None) or (
-            delta.model_extra.get("reasoning_content")
-            if getattr(delta, "model_extra", None)
-            else None
-        )
-        if reasoning:
-            thinking_parts.append(reasoning)
+            async for chunk in stream:
+                if agent._cancelled:
+                    break
+                if chunk.usage:
+                    agent._last_usage = (chunk.usage.completion_tokens, chunk.usage.prompt_tokens)
+                    hit = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
+                    if hit is None and getattr(chunk.usage, "model_extra", None):
+                        hit = chunk.usage.model_extra.get("prompt_cache_hit_tokens")
+                    if hit is not None:
+                        agent._last_cache_hit = hit
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-        if delta.content:
-            if not reply_parts and thinking_parts:
-                agent._t_thinking_end = time.perf_counter()
-                if on_thinking:
-                    await on_thinking("".join(thinking_parts))
-            reply_parts.append(delta.content)
-            if on_token:
-                await on_token(delta.content)
+                reasoning = getattr(delta, "reasoning_content", None) or (
+                    delta.model_extra.get("reasoning_content")
+                    if getattr(delta, "model_extra", None)
+                    else None
+                )
+                if reasoning:
+                    thinking_parts.append(reasoning)
 
-        for tc_chunk in (delta.tool_calls or []):
-            i = tc_chunk.index
-            if i not in _tc_buf:
-                _tc_buf[i] = {"id": tc_chunk.id or "", "name": "", "args": ""}
-            if tc_chunk.function:
-                _tc_buf[i]["name"] += tc_chunk.function.name or ""
-                _tc_buf[i]["args"] += tc_chunk.function.arguments or ""
+                if delta.content:
+                    if not reply_parts and thinking_parts:
+                        agent._t_thinking_end = time.perf_counter()
+                        if on_thinking:
+                            await on_thinking("".join(thinking_parts))
+                    reply_parts.append(delta.content)
+                    if on_token:
+                        await on_token(delta.content)
 
-    for idx in sorted(_tc_buf):
-        d = _tc_buf[idx]
-        tool_calls.append(SimpleNamespace(
-            id=d["id"],
-            function=SimpleNamespace(name=d["name"], arguments=d["args"]),
-        ))
+                for tc_chunk in (delta.tool_calls or []):
+                    i = tc_chunk.index
+                    if i not in _tc_buf:
+                        _tc_buf[i] = {"id": tc_chunk.id or "", "name": "", "args": ""}
+                    if tc_chunk.function:
+                        _tc_buf[i]["name"] += tc_chunk.function.name or ""
+                        _tc_buf[i]["args"] += tc_chunk.function.arguments or ""
+
+            for idx in sorted(_tc_buf):
+                d = _tc_buf[idx]
+                tool_calls.append(SimpleNamespace(
+                    id=d["id"],
+                    function=SimpleNamespace(name=d["name"], arguments=d["args"]),
+                ))
+        finally:
+            if gen is not None:
+                gen.update(
+                    output={"content": "".join(reply_parts)[:2000]},
+                    usage_details=_usage_details(agent._last_usage),
+                )
