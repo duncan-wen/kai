@@ -112,6 +112,36 @@ messages，log 會隨輪數線性膨脹；但完全不記又無法還原當下�
 `system_fingerprint`，搭配 `core/backends.py` 的 `_generation_messages`（per-turn 計數
 `agent._lf_gen_idx`，於 `chat()` 開頭重置）。
 
+## Sessions（Messages 視圖）修復 — 2026-11-23
+
+**症狀**：Sessions 頁面看不到任何對話，trace 樹長成「1 個 root 底下掛 1.1～1.6 六個
+chat-turn」。
+
+**兩個根因**：
+
+1. **訊息形狀不合**：Langfuse Sessions 只讀 trace **根節點**的 `input` / `output`，且必須是
+   `{"role", "content"}` 形狀才渲染成對話泡泡。原本寫的是 `{"user": ...}` / `{"reply": ...}`，
+   所以有資料但渲染不出來。
+2. **巢狀而非獨立 trace**：`chat-turn` 若在已有外層 span 的 context 中被建立，會變成子節點，
+   而 Sessions 只看根節點 → 讀不到。
+
+**修法**：
+
+| 位置 | 改動 |
+|------|------|
+| `core/langfuse_client.py` | 新增 `user_message()` / `assistant_message()` 產生標準訊息形狀 |
+| `core/langfuse_client.py` `trace()` | 進入前 `attach(Context())` 脫離既有 OTel context，**強制**成為新 trace 根節點，離開時 `detach` |
+| `core/agent.py` `chat()` | `input` 改 `user_message(...)`、`output` 改 `assistant_message(...)`；新增 `_turn_reply_text()` 只取**本輪**最後一則 assistant 訊息 |
+
+**設計要點**：`_turn_reply_text(turn_start)` 只看本輪新增訊息，避免工具迴圈被中斷時把
+上一輪的舊回覆誤當成本輪 output（原本 `history[-1]` 在結尾是 tool 訊息時會得到 `None`）。
+session 分組沿用 `SessionStore.session_id`（未命名為 `history-YYYYMMDD-HHMMSS`），
+因此多個獨立 trace 在 Sessions 頁會串成同一段對話。
+
+**驗證**：`tests/test_langfuse_client.py` 新增 4 個測試（訊息形狀、input 傳遞、只看本輪回覆）；
+並以 OTel InMemorySpanExporter 實證外層有 span 時 `chat-turn` 仍為 root（`parent=None`、
+trace_id 不同）。
+
 ## 已知注意事項
 
 - **Langfuse Cloud v3 read API 已棄用**（2026-11-16，`GET /api/public/traces` 回 410）。**不影響 SDK 寫入**，只影響讀取；讀取請用 v2（`iter_observation_pages`）或 langfuse-cli。

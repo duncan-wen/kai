@@ -23,7 +23,9 @@ from .config import (
 from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
-from .langfuse_client import trace, generation, system_fingerprint
+from .langfuse_client import (
+    trace, generation, system_fingerprint, user_message, assistant_message,
+)
 from .session_store import SessionStore
 from .tools import (
     BASH_TOOL,
@@ -475,10 +477,13 @@ class Agent:
                 if isinstance(b, dict) and b.get("type") == "text"
             )
         session_id = SessionStore(self._history_file).session_id if self._history_file else None
+        _turn_start = len(self.history)
         with trace(
             name="chat-turn",
             session_id=session_id,
-            input={"user": str(_user_text or "")[:1000]},
+            # Langfuse Sessions（Messages 視圖）只讀 trace 根節點的 input/output，
+            # 且必須是 {"role", "content"} 形狀才渲染得成對話泡泡。
+            input=user_message(str(_user_text or "")[:2000]),
             metadata={
                 "model": self.profile.name,
                 "backend": self.profile.backend,
@@ -493,7 +498,7 @@ class Agent:
                     model, self._pending_model = self._pending_model, None
                     self._apply_model(model)
                 if _span is not None:
-                    _last = self.history[-1] if self.history else None
+                    _reply = self._turn_reply_text(_turn_start)
                     _sys = next(
                         (m.get("content") for m in self.history if m.get("role") == "system"),
                         "",
@@ -501,9 +506,7 @@ class Agent:
                     _sys_text = str(_sys or "")
                     # metadata 一次給齊：SDK 的 update 是整批覆蓋，不能只給增量
                     _span.update(
-                        output={"reply": str(_last.get("content") or "")[:1000]}
-                        if _last and _last.get("role") == "assistant"
-                        else None,
+                        output=assistant_message(_reply[:2000]),
                         metadata={
                             "model": self.profile.name,
                             "backend": self.profile.backend,
@@ -511,8 +514,21 @@ class Agent:
                             "system_sha": system_fingerprint(_sys_text),
                             "system_chars": len(_sys_text),
                             "generations": self._lf_gen_idx,
+                            "reply_chars": len(_reply),
                         },
                     )
+
+    def _turn_reply_text(self, turn_start: int) -> str:
+        """本輪最後一則 assistant 訊息（trace output 用）；沒有則空字串。
+
+        只看本輪新增的訊息，避免把上一輪的舊回覆誤當成這一輪的輸出。
+        """
+        if turn_start >= len(self.history):
+            return ""
+        for m in reversed(self.history[turn_start:]):
+            if isinstance(m, dict) and m.get("role") == "assistant":
+                return str(m.get("content") or "")
+        return ""
 
     async def _run_turn(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """

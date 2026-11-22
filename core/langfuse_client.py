@@ -72,6 +72,16 @@ def flush() -> None:
             logger.warning(f"Langfuse flush 失敗：{e}")
 
 
+def user_message(text: str) -> dict:
+    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀。"""
+    return {"role": "user", "content": text}
+
+
+def assistant_message(text: str) -> dict:
+    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀。"""
+    return {"role": "assistant", "content": text}
+
+
 @contextmanager
 def trace(
     *,
@@ -84,6 +94,10 @@ def trace(
 
     內部建立的 generation / tool span 會自動嵌套到此 trace 下，
     因此一輪對話（含 tool calling loop 的多次模型呼叫）會被串成單一 trace。
+
+    強制成為「新的 trace 根節點」：進入前先 attach 一個空的 OTel context，
+    否則若呼叫端外層已有 span（例如 subagent dispatch），本 span 會被掛成子節點，
+    而 Langfuse Sessions 只讀 trace 根節點的 input/output → 對話就渲染不出來。
     """
     langfuse = get_langfuse()
     if langfuse is None:
@@ -91,11 +105,27 @@ def trace(
         return
     from langfuse import propagate_attributes
 
-    with propagate_attributes(session_id=_ascii_session_id(session_id), trace_name=name):
-        with langfuse.start_as_current_observation(
-            as_type="span", name=name, input=input, metadata=metadata,
-        ) as span:
-            yield span
+    token = None
+    try:  # pragma: no cover - 依賴 opentelemetry 內部行為
+        from opentelemetry import context as _ctx
+
+        token = _ctx.attach(_ctx.Context())
+    except Exception:  # noqa: BLE001
+        token = None
+    try:
+        with propagate_attributes(session_id=_ascii_session_id(session_id), trace_name=name):
+            with langfuse.start_as_current_observation(
+                as_type="span", name=name, input=input, metadata=metadata,
+            ) as span:
+                yield span
+    finally:
+        if token is not None:  # pragma: no cover
+            try:
+                from opentelemetry import context as _ctx
+
+                _ctx.detach(token)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @contextmanager

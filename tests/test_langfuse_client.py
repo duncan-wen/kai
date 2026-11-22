@@ -178,3 +178,74 @@ def test_generation_messages_system_off_by_config(monkeypatch):
 
     out = backends._generation_messages(_A(), [{"role": "system", "content": "FULL"}])
     assert all(m["role"] != "system" for m in out)
+
+
+def test_message_helpers_use_role_content_shape():
+    """Sessions（Messages 視圖）只認 {"role","content"}；用 {"user"}/{"reply"} 會渲染不出來。"""
+    assert lf.user_message("hi") == {"role": "user", "content": "hi"}
+    assert lf.assistant_message("yo") == {"role": "assistant", "content": "yo"}
+
+
+def test_trace_passes_message_input_to_sdk(monkeypatch):
+    """trace() 需把 input 原樣交給 start_as_current_observation（掛在 trace 根節點）。"""
+    import contextlib
+    import langfuse
+
+    captured = {}
+
+    class _Obs:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *a):
+            return False
+
+    class _Fake:
+        def start_as_current_observation(self, **kw):
+            captured.update(kw)
+            return _Obs()
+
+    monkeypatch.setattr(lf, "get_langfuse", lambda: _Fake())
+    monkeypatch.setattr(langfuse, "propagate_attributes", lambda **kw: contextlib.nullcontext())
+
+    with lf.trace(name="chat-turn", session_id="history-1", input=lf.user_message("hi")) as span:
+        assert span is not None
+    assert captured["name"] == "chat-turn"
+    assert captured["input"] == {"role": "user", "content": "hi"}
+    assert captured["as_type"] == "span"
+
+
+def test_turn_reply_text_ignores_previous_turns():
+    """只取本輪新增的 assistant 訊息，避免舊回覆被當成本輪輸出。"""
+    from core.agent import Agent
+
+    class _Stub:
+        history = [
+            {"role": "user", "content": "舊問題"},
+            {"role": "assistant", "content": "舊回覆"},
+            {"role": "user", "content": "新問題"},
+            {"role": "tool", "content": "工具結果"},
+            {"role": "assistant", "content": "新回覆"},
+        ]
+
+    assert Agent._turn_reply_text(_Stub(), 2) == "新回覆"
+    assert Agent._turn_reply_text(_Stub(), 4) == "新回覆"
+
+    class _Interrupted:
+        history = [
+            {"role": "assistant", "content": "舊回覆"},
+            {"role": "user", "content": "新問題"},
+            {"role": "tool", "content": "工具結果"},
+        ]
+
+    # 本輪沒有 assistant（工具迴圈被中斷）→ 空字串，而不是回傳上一輪舊回覆
+    assert Agent._turn_reply_text(_Interrupted(), 1) == ""
+
+
+def test_turn_reply_text_empty_when_no_new_messages():
+    from core.agent import Agent
+
+    class _Stub:
+        history = [{"role": "assistant", "content": "舊回覆"}]
+
+    assert Agent._turn_reply_text(_Stub(), 1) == ""
