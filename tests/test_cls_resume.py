@@ -355,3 +355,26 @@ def test_sessions_of_different_history_files_are_independent(tmp_path: Path) -> 
     assert main_store.resumed_from is None
     assert main_store.list_archives() == []
     assert SessionStore(agent_hf).resumed_from == arch
+
+
+# ── session_id（Langfuse 分組用） ──────────────────────────────────────────────
+
+
+def test_session_id_named_returns_name(tmp_path: Path) -> None:
+    """命名過的 session：session_id 直接用 session 名稱（非 history 檔名）。"""
+    hf = tmp_path / "history.json"
+    write_session(hf, "hi")
+    store = SessionStore(hf)
+    store.rename("台股分析師")
+    assert store.session_id == "台股分析師"
+
+
+def test_session_id_unnamed_uses_stable_ctime(tmp_path: Path) -> None:
+    """未命名 session：用 history 檔建立時間，同 session 跨 turn 穩定。"""
+    hf = tmp_path / "history.json"
+    write_session(hf, "hi")
+    store = SessionStore(hf)
+    sid = store.session_id
+    assert sid.startswith("history-")
+    # 同一個 history 檔（同 session）重複查詢結果一致
+    assert SessionStore(hf).session_id == sid

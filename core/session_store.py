@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +86,22 @@ class SessionStore:
             return own
         resumed = self.resumed_from
         return self._read_names().get(resumed.name, "") if resumed else ""
+
+    @property
+    def session_id(self) -> str:
+        """穩定的 session 標識：命名 session 回傳名稱；未命名回傳 history 檔建立時間。
+
+        供 Langfuse 等觀測系統分組用。注意 self._file.stem 永遠是 "history"
+        （每個 agent 的 history 檔固定名），無法用來區分不同 session。
+        """
+        name = self.name
+        if name:
+            return name
+        try:
+            ctime = self._file.stat().st_ctime
+        except OSError:
+            ctime = time.time()
+        return datetime.fromtimestamp(ctime).strftime("history-%Y%m%d-%H%M%S")
 
     def rename(self, name: str) -> None:
         """為 session 命名；尚未有新對話的 resumed session 直接改來源 archive 的名稱。"""

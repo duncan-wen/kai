@@ -24,6 +24,7 @@ from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .langfuse_client import trace, generation
+from .session_store import SessionStore
 from .tools import (
     BASH_TOOL,
     DIFY_RETRIEVE_TOOL,
@@ -471,7 +472,7 @@ class Agent:
                 for b in _user_text
                 if isinstance(b, dict) and b.get("type") == "text"
             )
-        session_id = self._history_file.stem if self._history_file else None
+        session_id = SessionStore(self._history_file).session_id if self._history_file else None
         with trace(
             name="chat-turn",
             session_id=session_id,
