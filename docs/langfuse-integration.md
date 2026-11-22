@@ -84,24 +84,40 @@ registry 已註冊 `langfuse_public_key` / `langfuse_secret_key` / `langfuse_bas
 | 描述性 trace name | ✅ `chat-turn` / `llm-ollama` / `llm-openai-compat` |
 | Span hierarchy（單一 parent 嵌套） | ✅ trace → generation → tool/agent |
 | Correct observation types | ✅ generation / tool / **agent** 四型態正確 |
-| Sensitive data masked | ✅ `_mask_args` + `trim_messages` 排除 system prompt |
+| Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
 | Capture thinking | ✅ generation output 含 thinking |
 | session_id 分組 | ✅ 命名 / 未命名（時間戳 fallback）皆可區分 |
 
 ## 驗證
 
-- ✅ pytest **108 全過**（含 session_id、ascii、遮罩等單元測試）
+- ✅ pytest **116 全過**（含 session_id、ascii、遮罩、system prompt 策略等單元測試）
 - ✅ ruff 全過
 - ✅ self-audit：送出真實 trace → fetch 回來逐項對照（上表）
 
 ---
+
+## system prompt 追蹤策略（避免 log 膨脹）
+
+一輪對話若含 tool calling loop，會有多次 LLM 呼叫（`generation` span）。若每次都記完整
+messages，log 會隨輪數線性膨脹；但完全不記又無法還原當下的動態上下文。折衷做法：
+
+| 位置 | 內容 |
+|------|------|
+| `chat-turn` metadata | `system_sha`（sha256 前 12 碼）、`system_chars`、`generations`（本 turn 呼叫次數） |
+| 本 turn **第 1 次** `generation` | 完整 system prompt（截斷 6000 字）+ 尾部 6 則非 system 訊息 |
+| 本 turn **第 2～N 次** `generation` | `{"role":"system","content":"[same as turn-1 generation]"}` + 尾部 6 則 |
+
+`system_sha` 讓你能在 dashboard 上直接看出 system prompt 有沒有變（專案記憶、skills 索引
+會隨時間變動），而不必比對全文。實作：`core/langfuse_client.py` 的 `trim_messages` /
+`system_fingerprint`，搭配 `core/backends.py` 的 `_generation_messages`（per-turn 計數
+`agent._lf_gen_idx`，於 `chat()` 開頭重置）。
 
 ## 已知注意事項
 
 - **Langfuse Cloud v3 read API 已棄用**（2026-11-16，`GET /api/public/traces` 回 410）。**不影響 SDK 寫入**，只影響讀取；讀取請用 v2（`iter_observation_pages`）或 langfuse-cli。
 - **重啟生效**：埋點在程式碼（`agent.py` / `backends.py` / `dispatch.py`），改動後需完全重啟 kai，`/reload-config` 不重載程式碼。
 - **flush**：app 退出時呼叫 `flush()`，否則最後幾個 span 會掉。
-- **隱私**：tool result 經 `_mask_args` 遮罩，system prompt 由 `trim_messages` 排除。
+- **隱私**：tool result 經 `_mask_args` 遮罩；system prompt 每 turn 僅首輪記錄全文（截斷 6000 字），後續輪次只放佔位符。要完全排除請設 `LANGFUSE_TRACE_SYSTEM_PROMPT=false`。
 
 ## 安裝
 

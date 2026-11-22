@@ -51,6 +51,9 @@ REGISTRY: list[ConfigEntry] = [
     ConfigEntry("dify_top_k",            "DIFY_TOP_K",            5,              int,   "int",  "Dify RAG 回傳段落數"),
     ConfigEntry("dify_rerank_provider",  "DIFY_RERANK_PROVIDER",  "xinference",   str,   "str",  "Dify rerank 供應商"),
     ConfigEntry("dify_rerank_model",     "DIFY_RERANK_MODEL",     "",             str,   "str",  "Dify rerank 模型名稱"),
+    # ── 可觀測性（Langfuse） ───────────────────────────────────────
+    ConfigEntry("langfuse_trace_system_prompt", "LANGFUSE_TRACE_SYSTEM_PROMPT", True, bool, "bool",
+                "trace 記錄完整 system prompt（每個 turn 僅第一輪）"),
     # ── API 金鑰（僅 .env） ─────────────────────────────────────────
     ConfigEntry("gemini_api_key",        "GEMINI_API_KEY",        "", str, "—", "Google Gemini API key",         api_key=True),
     ConfigEntry("deepseek_api_key",      "DEEPSEEK_API_KEY",      "", str, "—", "DeepSeek API key",              api_key=True),

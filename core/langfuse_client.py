@@ -147,26 +147,75 @@ def agent(*, name: str, input: Any = None) -> Iterator[Any]:
         yield a
 
 
-def trim_messages(messages: list, limit: int = 6, max_chars: int = 400) -> list[dict]:
+SYSTEM_PLACEHOLDER_TEXT = "[same as turn-1 generation]"
+
+
+def system_fingerprint(text: str) -> str:
+    """system prompt 的短指紋（sha256 前 12 碼）。
+
+    放進 trace metadata，可追蹤 system prompt 的版本變化，
+    又不必把可能含專案記憶的內容本體寫進 metadata。
+    """
+    import hashlib
+
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12]
+
+
+def _flatten_content(content: Any) -> str:
+    """多模態 content 取純文字部分。"""
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return str(content or "")
+
+
+def trim_messages(
+    messages: list,
+    limit: int = 6,
+    max_chars: int = 400,
+    *,
+    include_system: bool = False,
+    system_placeholder: bool = False,
+    system_max_chars: int = 6000,
+) -> list[dict]:
     """把 messages 轉成可安全追蹤的精簡形式。
 
-    排除 system prompt（可能含專案記憶等敏感內容）、每則截斷、只留尾部數則，
+    預設排除 system prompt（可能含專案記憶等敏感內容）、每則截斷、只留尾部數則，
     避免把完整 history 與敏感上下文灌進 Langfuse。
+
+    多輪 tool calling loop 的取捨（既不膨脹又能還原當下上下文）：
+      include_system=True     → 開頭放完整 system prompt（截斷 system_max_chars），
+                                用於每個 turn 的第一次模型呼叫
+      system_placeholder=True → 開頭放佔位符「同本 turn 第一次呼叫」，
+                                用於同 turn 的第 2～N 輪，避免重複整份 prompt
     """
-    out: list[dict] = []
+    head: list[dict] = []
+    if include_system or system_placeholder:
+        sys_text = next(
+            (
+                m.get("content")
+                for m in messages
+                if isinstance(m, dict) and m.get("role") == "system"
+            ),
+            None,
+        )
+        if include_system:
+            text = _flatten_content(sys_text)
+            if text:
+                head.append({"role": "system", "content": text[:system_max_chars]})
+        else:
+            head.append({"role": "system", "content": SYSTEM_PLACEHOLDER_TEXT})
+
+    body: list[dict] = []
     for m in messages:
         if not isinstance(m, dict):
             continue
         if m.get("role") == "system":
             continue
-        content = m.get("content")
-        if isinstance(content, list):
-            content = " ".join(
-                b.get("text", "")
-                for b in content
-                if isinstance(b, dict) and b.get("type") == "text"
-            )
-        text = str(content or "")
+        text = _flatten_content(m.get("content"))
         if text:
-            out.append({"role": m.get("role"), "content": text[:max_chars]})
-    return out[-limit:]
+            body.append({"role": m.get("role"), "content": text[:max_chars]})
+    return head + body[-limit:]

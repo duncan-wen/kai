@@ -56,6 +56,26 @@ def _usage_details(usage) -> "dict | None":
     return {"input": inp, "output": out, "total": out + inp}
 
 
+def _generation_messages(agent: "Agent", messages: list) -> "list | None":
+    """依 turn 內第幾次模型呼叫，決定 trace 的 messages 精簡策略。
+
+    每個 turn 的第一次呼叫記完整 system prompt（可還原當下動態上下文），
+    後續 tool calling 輪次只放佔位符，避免 log 隨輪數膨脹。
+    Langfuse 未啟用時直接回 None，省下 trim 的成本。
+    """
+    from .langfuse_client import get_langfuse
+
+    if get_langfuse() is None:
+        return None
+    first = getattr(agent, "_lf_gen_idx", 0) == 0
+    agent._lf_gen_idx = getattr(agent, "_lf_gen_idx", 0) + 1
+    return trim_messages(
+        messages,
+        include_system=first and getattr(_cfg, "LANGFUSE_TRACE_SYSTEM_PROMPT", True),
+        system_placeholder=not first,
+    )
+
+
 async def stream_ollama(
     agent: "Agent",
     messages: list,
@@ -71,7 +91,7 @@ async def stream_ollama(
     with generation(
         name="llm-ollama",
         model=agent.profile.name,
-        input={"messages": trim_messages(messages)},
+        input={"messages": _generation_messages(agent, messages)},
     ) as gen:
         try:
             _xml_retry = 0
@@ -158,7 +178,7 @@ async def stream_openai_compat(
     with generation(
         name="llm-openai-compat",
         model=agent.profile.name,
-        input={"messages": trim_messages(messages)},
+        input={"messages": _generation_messages(agent, messages)},
     ) as gen:
         try:
             messages = _to_openai_messages(messages)

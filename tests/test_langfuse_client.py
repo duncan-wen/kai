@@ -90,3 +90,91 @@ def test_subagent_dispatch_tools_set():
     from core.tools.dispatch import SUBAGENT_DISPATCH_TOOLS
     assert "send_to_agent" in SUBAGENT_DISPATCH_TOOLS
     assert "bash_exec" not in SUBAGENT_DISPATCH_TOOLS
+
+
+# ── system prompt 追蹤策略（第一輪完整 / 後續輪佔位符） ──────────────
+def test_trim_messages_include_system_truncates():
+    msgs = [
+        {"role": "system", "content": "S" * 9000},
+        {"role": "user", "content": "hi"},
+    ]
+    out = lf.trim_messages(msgs, include_system=True, system_max_chars=100)
+    assert out[0]["role"] == "system"
+    assert len(out[0]["content"]) == 100
+    assert out[1] == {"role": "user", "content": "hi"}
+
+
+def test_trim_messages_system_placeholder():
+    msgs = [
+        {"role": "system", "content": "SECRET"},
+        {"role": "user", "content": "hi"},
+    ]
+    out = lf.trim_messages(msgs, system_placeholder=True)
+    assert out[0] == {"role": "system", "content": lf.SYSTEM_PLACEHOLDER_TEXT}
+    assert "SECRET" not in str(out)
+
+
+def test_trim_messages_system_does_not_consume_limit():
+    """system 置於 head，不佔用尾部 limit 名額。"""
+    msgs = [{"role": "system", "content": "S"}] + [
+        {"role": "user", "content": f"m{i}"} for i in range(10)
+    ]
+    out = lf.trim_messages(msgs, limit=2, include_system=True)
+    assert out[0]["role"] == "system"
+    assert [m["content"] for m in out[1:]] == ["m8", "m9"]
+
+
+def test_trim_messages_include_system_wins_over_placeholder():
+    msgs = [{"role": "system", "content": "FULL"}, {"role": "user", "content": "hi"}]
+    out = lf.trim_messages(msgs, include_system=True, system_placeholder=True)
+    assert out[0] == {"role": "system", "content": "FULL"}
+
+
+def test_system_fingerprint_stable_and_short():
+    assert lf.system_fingerprint("abc") == lf.system_fingerprint("abc")
+    assert lf.system_fingerprint("abc") != lf.system_fingerprint("abd")
+    assert len(lf.system_fingerprint("abc")) == 12
+
+
+def test_generation_messages_first_turn_then_placeholder(monkeypatch):
+    """同 turn 第一次記完整 system，第二次起用佔位符；計數遞增。"""
+    from core import backends
+
+    monkeypatch.setattr(backends, "get_langfuse", None, raising=False)
+    monkeypatch.setattr("core.langfuse_client.get_langfuse", lambda: object())
+    monkeypatch.setattr("core.config.LANGFUSE_TRACE_SYSTEM_PROMPT", True)
+
+    class _A:
+        _lf_gen_idx = 0
+
+    a = _A()
+    msgs = [{"role": "system", "content": "FULL"}, {"role": "user", "content": "hi"}]
+    first = backends._generation_messages(a, msgs)
+    second = backends._generation_messages(a, msgs)
+    assert first[0] == {"role": "system", "content": "FULL"}
+    assert second[0] == {"role": "system", "content": lf.SYSTEM_PLACEHOLDER_TEXT}
+    assert a._lf_gen_idx == 2
+
+
+def test_generation_messages_none_when_disabled(monkeypatch):
+    from core import backends
+
+    monkeypatch.setattr("core.langfuse_client.get_langfuse", lambda: None)
+
+    class _A:
+        _lf_gen_idx = 0
+
+    assert backends._generation_messages(_A(), [{"role": "user", "content": "x"}]) is None
+
+
+def test_generation_messages_system_off_by_config(monkeypatch):
+    from core import backends
+
+    monkeypatch.setattr("core.langfuse_client.get_langfuse", lambda: object())
+    monkeypatch.setattr("core.config.LANGFUSE_TRACE_SYSTEM_PROMPT", False)
+
+    class _A:
+        _lf_gen_idx = 0
+
+    out = backends._generation_messages(_A(), [{"role": "system", "content": "FULL"}])
+    assert all(m["role"] != "system" for m in out)

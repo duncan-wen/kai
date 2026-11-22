@@ -23,7 +23,7 @@ from .config import (
 from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
-from .langfuse_client import trace, generation
+from .langfuse_client import trace, generation, system_fingerprint
 from .session_store import SessionStore
 from .tools import (
     BASH_TOOL,
@@ -82,6 +82,7 @@ class Agent:
         self.mcp_enabled: bool = True  # definition 的 mcp_servers 設為 {} 時為 False
         self._in_turn: bool = False  # chat() 執行中
         self._pending_model: str | None = None  # turn 中途要求換的模型，turn 結束後生效
+        self._lf_gen_idx: int = 0  # 本 turn 第幾次模型呼叫（Langfuse 用來決定 system prompt 記法）
         # agent 專屬目錄（存 history.json / notes.md；None 表示用 cwd/.kai）
         self._agent_dir: "Path | None" = agent_dir
         self._history_file: Path = history_file or HISTORY_FILE
@@ -465,6 +466,7 @@ class Agent:
     async def chat(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """單輪對話；turn 中途要求的換模型在 turn 結束後才生效。"""
         self._in_turn = True
+        self._lf_gen_idx = 0
         _user_text = user_msg.get("content") if isinstance(user_msg, dict) else ""
         if isinstance(_user_text, list):
             _user_text = " ".join(
@@ -492,8 +494,25 @@ class Agent:
                     self._apply_model(model)
                 if _span is not None:
                     _last = self.history[-1] if self.history else None
-                    if _last and _last.get("role") == "assistant":
-                        _span.update(output={"reply": str(_last.get("content") or "")[:1000]})
+                    _sys = next(
+                        (m.get("content") for m in self.history if m.get("role") == "system"),
+                        "",
+                    )
+                    _sys_text = str(_sys or "")
+                    # metadata 一次給齊：SDK 的 update 是整批覆蓋，不能只給增量
+                    _span.update(
+                        output={"reply": str(_last.get("content") or "")[:1000]}
+                        if _last and _last.get("role") == "assistant"
+                        else None,
+                        metadata={
+                            "model": self.profile.name,
+                            "backend": self.profile.backend,
+                            "agent": self.display_name,
+                            "system_sha": system_fingerprint(_sys_text),
+                            "system_chars": len(_sys_text),
+                            "generations": self._lf_gen_idx,
+                        },
+                    )
 
     async def _run_turn(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
         """
