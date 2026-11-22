@@ -71,8 +71,8 @@ REGISTRY: dict[str, ModelProfile] = {
         num_ctx=32768,  # 9.6GB CPU only，同上
     ),
     # ── DeepSeek (DeepSeek API) ───────────────────────────────────────────────
-    "deepseek-v4-flash": ModelProfile(
-        "deepseek-v4-flash",
+    "deepseek-flash": ModelProfile(
+        "deepseek-flash",
         supports_thinking=True,
         supports_vision=False,
         supports_tools=True,
