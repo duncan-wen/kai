@@ -9,3 +9,4 @@
 | [agent-tool-integration.md](agent-tool-integration.md) | Agent 工具整合模式 |
 | [app-tools-design.md](app-tools-design.md) | App-Level Tools：讓 AI 直接操作 app 功能的設計 |
 | [agent-memory-system.md](agent-memory-system.md) | Agent 記憶體與 System Prompt 機制 |
+| [langfuse-integration.md](langfuse-integration.md) | Langfuse 可觀測性串接規劃：路徑比較、埋點架構、分階段實作 |
