@@ -37,12 +37,12 @@
 
 ## 階段 2：互動層（工具 + /skills 指令）
 
-- [ ] 新增 `core/tools/skills.py`
+- [x] 新增 `core/tools/skills.py`
   - `use_skill(name)`：回傳完整 SKILL.md 內容
   - `list_skills()`：回傳索引清單
   - 各自對應 `TOOL` schema，註冊到 `tools_map`（走既有 `run_tool` 分發）
-- [ ] `widgets/commands.py`：加 `Hit(0.8, "/skills  列出可用 skills", app._do_skills_list, ...)`
-- [ ] 新增 `mixins/skills.py`：`_do_skills_list` → 開 `SkillsListScreen`（鏡像 `MCPListScreen`）
+- [x] `widgets/commands.py`：加 `Hit(0.8, "/skills  列出可用 skills", app._do_skills_list, ...)`
+- [x] 新增 `mixins/skills.py`：`_do_skills_list` → 開 `SkillsListScreen`（鏡像 `MCPListScreen`）
   - 每列顯示：名稱 + description + when_to_use
 
 **驗收**：模型可呼叫 `use_skill("xxx")` 拿到內容；`/skills` 開 screen 列出全部技能。
@@ -72,5 +72,5 @@
 |------|------|
 | 0 掃描器 | ✅ 完成 |
 | 1 顯示層 | ✅ 完成 |
-| 2 互動層 | ⬜ 未開始 |
+| 2 互動層 | ✅ 完成 |
 | 3 能力層 | ⬜ 未開始 |

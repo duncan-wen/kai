@@ -38,6 +38,7 @@ from mixins.agents import AgentsMixin
 from mixins.app_tools import AppToolsMixin
 from mixins.bash import BashMixin
 from mixins.mcp import MCPMixin
+from mixins.skills import SkillsMixin
 from mixins.session import SessionMixin
 from mixins.streaming import StreamingMixin
 from textual_fspicker import FileOpen, Filters, SelectDirectory
@@ -123,7 +124,7 @@ class AgentMessage(Message):
         self.content = content
 
 
-class ChatApp(MCPMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, StreamingMixin, App[None]):
+class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, StreamingMixin, App[None]):
     CSS_PATH = "app.tcss"
     COMMANDS = App.COMMANDS | {ChatCommands}
 

@@ -104,6 +104,11 @@ class ChatCommands(Provider):
                 partial(_fill_prompt, app, "/mcp-del "),
                 help="移除：/mcp-del <name>"),
 
+            # ── Skill ─────────────────────────────────────────────────────────
+            Hit(0.8, "/skills  列出可用 skills",
+                app._do_skills_list,
+                help="列出所有可用 skill 與觸發時機"),
+
             # ── Agent ─────────────────────────────────────────────────────────
             Hit(0.8, "/list-agents  列出所有 agents",
                 app._do_list_agents,

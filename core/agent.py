@@ -20,19 +20,23 @@ from .config import (
     HISTORY_KEEP,
     get_nickname,
 )
-from .skills import skills_index_text
+from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .tools import (
     BASH_TOOL,
     DIFY_RETRIEVE_TOOL,
     FETCH_URLS_TOOL,
+    LIST_SKILLS_TOOL,
     OPEN_AGENT_TOOL,
     SEARCH_TOOL,
+    USE_SKILL_TOOL,
     bash_exec,
     dify_retrieve,
     fetch_urls,
+    list_skills,
     run_tool,
+    use_skill,
     web_search,
 )
 
@@ -55,6 +59,8 @@ class Agent:
             "fetch_urls": fetch_urls,
             "bash_exec": bash_exec,
             "dify_retrieve": dify_retrieve,
+            "use_skill": use_skill,
+            "list_skills": list_skills,
         }
         self.datasets: list[str] = []  # 此 agent 可查的 Dify KB ID 清單（空 = 不啟用 RAG）
         self._dify_table: str = ""  # fetch_dify_datasets
@@ -476,6 +482,8 @@ class Agent:
                 active_tools.append(OPEN_AGENT_TOOL)
             if _cfg.DIFY_API_KEY and self.datasets:
                 active_tools.append(DIFY_RETRIEVE_TOOL)
+            if discover_skills():
+                active_tools.extend([USE_SKILL_TOOL, LIST_SKILLS_TOOL])
         if self.profile.supports_tools and self.mcp_client:
             active_tools.extend(self.mcp_client.tools)
         if self.profile.supports_tools and self.extra_tools:
