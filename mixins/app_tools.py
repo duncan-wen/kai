@@ -16,6 +16,7 @@ from .app_tool_schemas import (
     CHANGE_DIR_TOOL as _CHANGE_DIR_TOOL,
     CLOSE_AGENT_TOOL as _CLOSE_AGENT_TOOL,
     COMPACT_HISTORY_TOOL as _COMPACT_HISTORY_TOOL,
+    CREATE_SKILL_TOOL as _CREATE_SKILL_TOOL,
     DELETE_AGENT_TOOL as _DELETE_AGENT_TOOL,
     DESIGN_SYSTEM_PROMPT_TOOL as _DESIGN_SYSTEM_PROMPT_TOOL,
     LIST_AGENTS_TOOL as _LIST_AGENTS_TOOL,
@@ -98,7 +99,7 @@ class AppToolsMixin(_MixinBase):
             "**嚴禁用文字假裝已執行——必須呼叫對應工具，操作才會真正發生。**\n"
             "收到「開啟/載入 agent」請求時，必須先呼叫 list_open_agents 確認目前狀態，再決定是否呼叫 load_agent。\n"
             "收到「叫/通知/委派/傳任務給某 agent」的請求時，先呼叫 load_agent（已開啟時僅切換 tab，不重複建），再呼叫 send_to_agent。\n"
-            "可用工具：list_open_agents、list_agents、design_system_prompt、create_agent、load_agent、"
+            "可用工具：list_open_agents、list_agents、design_system_prompt、create_agent、create_skill、load_agent、"
             "close_agent、delete_agent、reload_agent、change_dir、switch_model、remember、rename_session、"
             "reload_config、compact_history、list_mcp、add_mcp、remove_mcp、reload_mcp、set_tts、send_to_agent。"
         )
@@ -114,6 +115,7 @@ class AppToolsMixin(_MixinBase):
             _RELOAD_AGENT_TOOL,
             _CHANGE_DIR_TOOL,
             switch_model_tool,
+            _CREATE_SKILL_TOOL,
             _REMEMBER_TOOL,
             _RENAME_SESSION_TOOL,
             _RELOAD_CONFIG_TOOL,
@@ -137,6 +139,7 @@ class AppToolsMixin(_MixinBase):
             "reload_agent":     self._app_reload_agent,
             "change_dir":       self._app_change_dir,
             "switch_model":     self._app_switch_model,
+            "create_skill":     self._app_create_skill,
             "remember":         self._app_remember,
             "rename_session":   self._app_rename_session,
             "reload_config":    self._app_reload_config,
@@ -308,6 +311,27 @@ class AppToolsMixin(_MixinBase):
             f.write(f"\n- {note}")
         self.agent._rebuild_system_prompt()
         return f"✅ 已記住：{note}"
+
+    async def _app_create_skill(
+        self,
+        name: str,
+        description: str,
+        body: str,
+        when_to_use: str = "",
+        global_scope: bool = False,
+    ) -> str:
+        from core.skills import create_skill
+        try:
+            skill = create_skill(
+                name, description, body,
+                when_to_use=when_to_use, global_scope=global_scope,
+            )
+        except Exception as e:
+            return f"建立 skill 失敗：{e}"
+        self.agent._rebuild_system_prompt()
+        self._refresh_skills_sidebar()
+        scope = "全域 ~/.kai/skills" if global_scope else "專案 .kai/skills"
+        return f"✅ 已建立 skill：{skill.name}（{scope}，{skill.path}）"
 
     async def _app_rename_session(self, name: str) -> str:
         self._do_rename(name)

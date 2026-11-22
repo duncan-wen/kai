@@ -82,3 +82,63 @@ def test_load_skill(dirs):
     s = skills.load_skill("git-commit")
     assert s is not None and s.name == "git-commit"
     assert skills.load_skill("不存在") is None
+
+
+# ── 階段 3：scripts/ 捆綁 + create_skill ──────────────────────────────
+
+def test_scripts_bundled_are_listed(dirs):
+    local, _ = dirs
+    p = local / "pdf-tool"
+    (p / "scripts").mkdir(parents=True)
+    (p / "SKILL.md").write_text(
+        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8")
+    (p / "scripts" / "extract.py").write_text("print('hi')\n", encoding="utf-8")
+    (p / "scripts" / "cleanup.sh").write_text("echo hi\n", encoding="utf-8")
+    s = skills.discover_skills()[0]
+    assert s.scripts == ["scripts/cleanup.sh", "scripts/extract.py"]
+
+
+def test_no_scripts_dir_means_empty(dirs):
+    local, _ = dirs
+    _write(local, "plain", "name: plain\ndescription: 無腳本")
+    s = skills.discover_skills()[0]
+    assert s.scripts == []
+
+
+def test_use_skill_includes_scripts_and_hint(dirs):
+    import asyncio
+    from core.tools.skills import use_skill
+    local, _ = dirs
+    p = local / "pdf-tool"
+    (p / "scripts").mkdir(parents=True)
+    (p / "SKILL.md").write_text(
+        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8")
+    (p / "scripts" / "extract.py").write_text("print('hi')\n", encoding="utf-8")
+    out = asyncio.run(use_skill("pdf-tool"))
+    assert "捆綁腳本" in out
+    assert "scripts/extract.py" in out
+    assert "bash_exec" in out
+
+
+def test_create_skill_local(dirs):
+    local, _ = dirs
+    s = skills.create_skill("my-skill", "測試用", "# 步驟一\n做某事")
+    assert s.name == "my-skill"
+    assert s.description == "測試用"
+    assert s.body.strip() == "# 步驟一\n做某事"
+    assert (local / "my-skill" / "SKILL.md").is_file()
+    assert any(x.name == "my-skill" for x in skills.discover_skills())
+
+
+def test_create_skill_global(dirs):
+    _, global_ = dirs
+    s = skills.create_skill(
+        "g-skill", "全域", "# body", when_to_use="需要時", global_scope=True)
+    assert s.name == "g-skill"
+    assert s.when_to_use == "需要時"
+    assert (global_ / "g-skill" / "SKILL.md").is_file()
+
+
+def test_create_skill_empty_name_raises(dirs):
+    with pytest.raises(ValueError):
+        skills.create_skill("  ", "x", "body")

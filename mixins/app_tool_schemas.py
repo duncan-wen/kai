@@ -106,6 +106,29 @@ REMEMBER_TOOL = {
     },
 }
 
+CREATE_SKILL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "create_skill",
+        "description": (
+            "建立一個新的 skill（能力包）。當用戶說「幫我做一個 XX 的 skill」時使用。"
+            "會建立 SKILL.md（YAML frontmatter + 操作步驟本體）。"
+            "**必須呼叫此工具才能實際建立，嚴禁只用文字假裝已建立。**"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "skill 名稱（同時用作目錄名，建議 kebab-case 英文）"},
+                "description": {"type": "string", "description": "一行描述這個 skill 的用途"},
+                "body": {"type": "string", "description": "SKILL.md 本體：給模型的詳細操作步驟（Markdown）"},
+                "when_to_use": {"type": "string", "description": "觸發時機說明，可省略"},
+                "global_scope": {"type": "boolean", "description": "預設 false。true = 存到 ~/.kai/skills/（跨專案）；false = 存到 .kai/skills/（專案）"},
+            },
+            "required": ["name", "description", "body"],
+        },
+    },
+}
+
 RENAME_SESSION_TOOL = {
     "type": "function",
     "function": {

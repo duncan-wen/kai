@@ -51,8 +51,8 @@
 
 ## 階段 3：能力層（scripts 捆綁 + app tool）
 
-- [ ] scripts/ 捆綁支援：路徑解析 + 安全提示（模型經既有 `bash_exec` 執行，不新增權限）
-- [ ] app tool：`create_skill` / `list_skills`（對齊 `remember` / `create_agent` 慣例）
+- [x] scripts/ 捆綁支援：路徑解析 + 安全提示（模型經既有 `bash_exec` 執行，不新增權限）
+- [x] app tool：`create_skill`（`list_skills` 已於階段 2 完成，走 `run_tool` 分發，不重複做）
 
 **驗收**：skill 可附 `scripts/`，模型依 SKILL.md 指示透過 bash 執行。
 
@@ -60,9 +60,9 @@
 
 ## 收尾
 
-- [ ] 更新 `docs/README.md` 索引
-- [ ] 自測 + 提交（建議每階段一 commit，訊息標 `feat(skills): ...`）
-- [ ] 視需要合回 main
+- [x] 更新 `docs/README.md` 索引（已於階段 0 收錄 `skill-system.md`）
+- [x] 自測 + 提交（每階段一 commit，訊息標 `feat(skills): ...`）
+- [ ] 視需要合回 main（留待使用者決定）
 
 ---
 
@@ -73,4 +73,4 @@
 | 0 掃描器 | ✅ 完成 |
 | 1 顯示層 | ✅ 完成 |
 | 2 互動層 | ✅ 完成 |
-| 3 能力層 | ⬜ 未開始 |
+| 3 能力層 | ✅ 完成 |

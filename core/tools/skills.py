@@ -48,9 +48,23 @@ def _format_skill(s: Skill) -> str:
     if s.when_to_use:
         parts.append(f"觸發時機：{s.when_to_use}")
     parts.append(f"路徑：{s.path}")
+    if s.scripts:
+        parts.append(_format_scripts(s))
     if s.body:
         parts.append("\n" + s.body)
     return "\n".join(parts)
+
+
+def _format_scripts(s: Skill) -> str:
+    """捆綁腳本清單 + 安全提示（引導模型用 bash_exec 跑現成腳本）。"""
+    lines = [
+        "\n## 📦 捆綁腳本（scripts/）",
+        "以下腳本隨本 skill 提供、已由作者測試，請優先執行而非自己現寫：",
+    ]
+    for rel in s.scripts:
+        lines.append(f"- {s.path / rel}")
+    lines.append("執行方式：用 bash_exec 直接跑上述路徑（例如 `python <路徑>`）。")
+    return "\n".join(lines)
 
 
 async def use_skill(name: str) -> str:
