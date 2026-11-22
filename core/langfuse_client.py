@@ -129,6 +129,24 @@ def tool(*, name: str, input: Any = None) -> Iterator[Any]:
         yield t
 
 
+@contextmanager
+def agent(*, name: str, input: Any = None) -> Iterator[Any]:
+    """建立 agent observation（subagent dispatch）。未啟用回傳 nullcontext。
+
+    官方 multi-agent best practice：dispatch 其他 agent 的動作要用
+    as_type="agent"（而非 tool/span），讓其在 Langfuse Agent Graph 中
+    顯示為獨立子 agent 節點。本專案用於 send_to_agent。
+    """
+    langfuse = get_langfuse()
+    if langfuse is None:
+        yield None
+        return
+    with langfuse.start_as_current_observation(
+        as_type="agent", name=name, input=input,
+    ) as a:
+        yield a
+
+
 def trim_messages(messages: list, limit: int = 6, max_chars: int = 400) -> list[dict]:
     """把 messages 轉成可安全追蹤的精簡形式。
 

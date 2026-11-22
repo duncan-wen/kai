@@ -132,8 +132,11 @@ async def stream_ollama(
                     raise
         finally:
             if gen is not None:
+                _out = {"content": "".join(reply_parts)[:2000]}
+                if thinking_parts:
+                    _out["thinking"] = "".join(thinking_parts)[:2000]
                 gen.update(
-                    output={"content": "".join(reply_parts)[:2000]},
+                    output=_out,
                     usage_details=_usage_details(agent._last_usage),
                 )
 
@@ -230,7 +233,10 @@ async def stream_openai_compat(
                 ))
         finally:
             if gen is not None:
+                _out = {"content": "".join(reply_parts)[:2000]}
+                if thinking_parts:
+                    _out["thinking"] = "".join(thinking_parts)[:2000]
                 gen.update(
-                    output={"content": "".join(reply_parts)[:2000]},
+                    output=_out,
                     usage_details=_usage_details(agent._last_usage),
                 )

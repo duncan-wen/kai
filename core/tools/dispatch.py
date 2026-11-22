@@ -39,15 +39,29 @@ def _mask_args(raw) -> dict:
     return masked
 
 
+# subagent dispatch 工具：官方 multi-agent best practice 要求 type=agent（非 tool）
+SUBAGENT_DISPATCH_TOOLS = {"send_to_agent"}
+
+
 async def run_tool(tc, tools_map: dict, mcp_client=None) -> tuple[str, str]:
     """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。"""
     import json
 
-    from ..langfuse_client import tool
-
     fn_name = tc.function.name
     raw_args = tc.function.arguments
     raw = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+
+    if fn_name in SUBAGENT_DISPATCH_TOOLS:
+        from ..langfuse_client import agent
+
+        subagent = str(raw.get("name", "unknown")) if isinstance(raw, dict) else "unknown"
+        with agent(name=f"agent:{subagent}", input={"args": _mask_args(raw)}) as a:
+            fn, result = await _dispatch(fn_name, raw, tools_map, mcp_client)
+            if a is not None:
+                a.update(output={"result": str(result)[:1000]})
+            return fn, result
+
+    from ..langfuse_client import tool
 
     with tool(name=fn_name, input={"args": _mask_args(raw)}) as t:
         fn, result = await _dispatch(fn_name, raw, tools_map, mcp_client)

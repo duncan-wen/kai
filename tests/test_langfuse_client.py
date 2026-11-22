@@ -10,15 +10,15 @@ def _reset():
 
 
 def test_no_creds_returns_none(monkeypatch):
-    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
-    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.setattr("core.config.LANGFUSE_PUBLIC_KEY", None)
+    monkeypatch.setattr("core.config.LANGFUSE_SECRET_KEY", None)
     _reset()
     assert lf.get_langfuse() is None
 
 
 def test_context_managers_are_noop(monkeypatch):
-    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
-    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    monkeypatch.setattr("core.config.LANGFUSE_PUBLIC_KEY", None)
+    monkeypatch.setattr("core.config.LANGFUSE_SECRET_KEY", None)
     _reset()
     with lf.trace(name="x", session_id="s") as s:
         assert s is None
@@ -26,6 +26,8 @@ def test_context_managers_are_noop(monkeypatch):
             assert g is None
             with lf.tool(name="t") as t:
                 assert t is None
+            with lf.agent(name="agent:子代理") as a:
+                assert a is None
 
 
 def test_trim_messages_excludes_system_and_truncates():
@@ -82,3 +84,9 @@ def test_ascii_session_id_hashes_non_ascii():
 
 def test_ascii_session_id_none():
     assert lf._ascii_session_id(None) is None
+
+
+def test_subagent_dispatch_tools_set():
+    from core.tools.dispatch import SUBAGENT_DISPATCH_TOOLS
+    assert "send_to_agent" in SUBAGENT_DISPATCH_TOOLS
+    assert "bash_exec" not in SUBAGENT_DISPATCH_TOOLS
