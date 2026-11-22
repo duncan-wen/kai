@@ -36,6 +36,12 @@ images/
 .playwright-mcp/
 notebooks/
 agent-talk/
-.kai/opensource-tasks.md
-.kai/dev-docs/
 demo/out/
+
+# Codegraph local index cache
+.codegraph/
+
+# Kai per-user runtime data（個人，不進版控）
+.kai/*
+# 例外：專案層 skill 要跟團隊共享
+!.kai/skills/
