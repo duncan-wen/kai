@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import os
+import re
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
@@ -39,9 +41,12 @@ def get_langfuse():
         _client = None
         return None
     try:
-        from langfuse import get_client as _get_client
+        from langfuse import Langfuse
 
-        _client = _get_client()
+        _client = Langfuse(
+            environment=getattr(_cfg, "LANGFUSE_TRACING_ENVIRONMENT", "") or None,
+            mask=mask_secrets,
+        )
         logger.info("Langfuse 追蹤已啟用")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"Langfuse 初始化失敗（追蹤停用）：{e}")
@@ -61,6 +66,76 @@ def _ascii_session_id(session_id: Optional[str]) -> Optional[str]:
         import hashlib
 
         return hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:16]
+
+
+MASK = "***"
+
+# 常見憑證格式（工具輸出如 `cat .env`、`env` 可能整段帶出）
+_SECRET_PATTERNS = [
+    re.compile(r"\b(?:sk|pk)-lf-[A-Za-z0-9-]{8,}"),           # Langfuse
+    re.compile(r"\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}"),     # OpenAI / DeepSeek / Anthropic
+    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"),                   # Google
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),               # GitHub
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),             # Slack
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),    # Authorization header
+]
+# 賦值形式：保留名稱、遮掉值。純數字值不遮（MAX_TOKENS=4096 之類的設定不是密鑰）。
+_ASSIGNMENTS = [
+    # .env / shell：GEMINI_API_KEY=xxx、export FOO_SECRET="xxx"（大寫變數名，區分大小寫）
+    re.compile(
+        r"(\b[A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*\s*=\s*[\"']?)"
+        r"(?![0-9]+\b)([^\s\"']{4,})"
+    ),
+    # JSON / YAML：「"api_key": "xxx"」、「password: xxx」
+    re.compile(
+        r"(?i)([\"']?\b(?:api[_-]?key|secret[_-]?key|client[_-]?secret|password|passwd"
+        r"|access[_-]?token|auth[_-]?token|refresh[_-]?token)[\"']?\s*[:=]\s*[\"']?)"
+        r"(?![0-9]+\b)([^\s\"',}]{4,})"
+    ),
+]
+_SENSITIVE_ENV = re.compile(r"(?i)(KEY|SECRET|TOKEN|PASSWORD|PASSWD)")
+
+
+def _known_secret_values() -> list[str]:
+    """目前環境變數中的密鑰原值（≥8 字元），長的先比對，避免部分取代。"""
+    values = {
+        v for k, v in os.environ.items()
+        if _SENSITIVE_ENV.search(k) and isinstance(v, str) and len(v) >= 8
+    }
+    return sorted(values, key=len, reverse=True)
+
+
+def _mask_text(text: str, known: list[str]) -> str:
+    for v in known:
+        if v in text:
+            text = text.replace(v, MASK)
+    for pat in _SECRET_PATTERNS:
+        text = pat.sub(MASK, text)
+    for pat in _ASSIGNMENTS:
+        text = pat.sub(lambda m: m.group(1) + MASK, text)
+    return text
+
+
+def _mask_value(data: Any, known: list[str]) -> Any:
+    if isinstance(data, str):
+        return _mask_text(data, known)
+    if isinstance(data, dict):
+        return {k: _mask_value(v, known) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_mask_value(v, known) for v in data]
+    return data
+
+
+def mask_secrets(*, data: Any, **_: Any) -> Any:
+    """Langfuse client 的 mask hook：所有上傳的 input / output / metadata 都會經過。
+
+    工具參數另有 `_mask_args` 以欄位名遮罩；這裡補上「值」層級的遮罩，
+    擋住工具輸出（例如 bash 印出 .env）把密鑰帶進 tool span 與後續 generation input。
+    """
+    try:
+        return _mask_value(data, _known_secret_values())
+    except Exception:  # noqa: BLE001 — 遮罩失敗不能讓原文外洩
+        return MASK
 
 
 def flush() -> None:
@@ -91,10 +166,11 @@ def trace(
     *,
     name: str,
     session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
     input: Any = None,
     metadata: Optional[dict] = None,
 ) -> Iterator[Any]:
-    """建立 root span（trace）並傳播 session 屬性。未啟用回傳 nullcontext。
+    """建立 root span（trace）並傳播 session / user 屬性。未啟用回傳 nullcontext。
 
     內部建立的 generation / tool span 會自動嵌套到此 trace 下，
     因此一輪對話（含 tool calling loop 的多次模型呼叫）會被串成單一 trace。
@@ -117,7 +193,11 @@ def trace(
     except Exception:  # noqa: BLE001
         token = None
     try:
-        with propagate_attributes(session_id=_ascii_session_id(session_id), trace_name=name):
+        with propagate_attributes(
+            session_id=_ascii_session_id(session_id),
+            user_id=_ascii_session_id(user_id),
+            trace_name=name,
+        ):
             with langfuse.start_as_current_observation(
                 as_type="span", name=name, input=input, metadata=metadata,
             ) as span:
@@ -132,12 +212,22 @@ def trace(
                 pass
 
 
+GENERATION_NAME = "generate-response"
+"""對話模型呼叫的 generation 名稱。
+
+依官方建議以動作命名、不帶模型或後端名稱：名稱是 evaluator / dashboard 的篩選鍵，
+換模型時不能跟著變。後端改記在 metadata.backend。
+"""
+
+
 @contextmanager
 def generation(
     *,
     name: str,
     model: Optional[str] = None,
     input: Any = None,
+    model_parameters: Optional[dict] = None,
+    metadata: Optional[dict] = None,
 ) -> Iterator[Any]:
     """建立 generation span（一次 LLM 呼叫）。未啟用回傳 nullcontext。"""
     langfuse = get_langfuse()
@@ -146,6 +236,7 @@ def generation(
         return
     with langfuse.start_as_current_observation(
         as_type="generation", name=name, model=model, input=input,
+        model_parameters=model_parameters, metadata=metadata,
     ) as gen:
         yield gen
 

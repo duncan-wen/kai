@@ -481,6 +481,7 @@ class Agent:
         with trace(
             name="chat-turn",
             session_id=session_id,
+            user_id=_cfg.USERNAME or None,
             # Langfuse Sessions（Messages 視圖）只讀 trace 根節點的 input/output，
             # 且必須是 {"role", "content"} 形狀才渲染得成對話泡泡。
             input=user_message(str(_user_text or "")[:2000]),

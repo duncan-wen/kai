@@ -54,6 +54,8 @@ REGISTRY: list[ConfigEntry] = [
     # ── 可觀測性（Langfuse） ───────────────────────────────────────
     ConfigEntry("langfuse_trace_system_prompt", "LANGFUSE_TRACE_SYSTEM_PROMPT", True, bool, "bool",
                 "trace 記錄完整 system prompt（每個 turn 僅第一輪）"),
+    ConfigEntry("langfuse_tracing_environment", "LANGFUSE_TRACING_ENVIRONMENT", "development", str, "str",
+                "Langfuse environment（區隔開發與正式資料）"),
     # ── API 金鑰（僅 .env） ─────────────────────────────────────────
     ConfigEntry("gemini_api_key",        "GEMINI_API_KEY",        "", str, "—", "Google Gemini API key",         api_key=True),
     ConfigEntry("deepseek_api_key",      "DEEPSEEK_API_KEY",      "", str, "—", "DeepSeek API key",              api_key=True),

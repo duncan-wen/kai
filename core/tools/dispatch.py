@@ -40,6 +40,20 @@ def _mask_args(raw) -> dict:
     return masked
 
 
+def _record_result(obs, tr: ToolResult) -> None:
+    """把工具結果寫回 Langfuse observation；失敗時標 level=ERROR，才能在 UI 篩出錯誤。"""
+    if obs is None:
+        return
+    if tr.is_error:
+        obs.update(
+            output={"result": tr.output[:1000]},
+            level="ERROR",
+            status_message=tr.output[:200],
+        )
+    else:
+        obs.update(output={"result": tr.output[:1000]})
+
+
 # subagent dispatch 工具：官方 multi-agent best practice 要求 type=agent（非 tool）
 SUBAGENT_DISPATCH_TOOLS = {"send_to_agent"}
 
@@ -61,16 +75,14 @@ async def run_tool(tc, tools_map: dict, mcp_client=None) -> ToolResult:
         subagent = str(raw.get("name", "unknown")) if isinstance(raw, dict) else "unknown"
         with agent(name=f"agent:{subagent}", input={"args": _mask_args(raw)}) as a:
             tr = await _dispatch(fn_name, raw, tools_map, mcp_client)
-            if a is not None:
-                a.update(output={"result": tr.output[:1000]})
+            _record_result(a, tr)
             return tr
 
     from ..langfuse_client import tool
 
     with tool(name=fn_name, input={"args": _mask_args(raw)}) as t:
         tr = await _dispatch(fn_name, raw, tools_map, mcp_client)
-        if t is not None:
-            t.update(output={"result": tr.output[:1000]})
+        _record_result(t, tr)
         return tr
 
 

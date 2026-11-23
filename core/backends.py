@@ -10,6 +10,7 @@ import asyncio
 import base64
 import mimetypes
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -21,7 +22,7 @@ from openai import AsyncOpenAI
 
 from . import config as _cfg
 from .tools import clean_thinking
-from .langfuse_client import generation, generation_output, trim_messages
+from .langfuse_client import GENERATION_NAME, generation, generation_output, trim_messages
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -47,13 +48,35 @@ def _to_openai_messages(messages: list[dict]) -> list[dict]:
     return result
 
 
-def _usage_details(usage) -> "dict | None":
-    """把 agent._last_usage (output, input) 轉成 Langfuse usage_details。"""
+def _usage_details(usage, cache_hit: "int | None" = None) -> "dict | None":
+    """把 agent._last_usage (output, input) 轉成 Langfuse usage_details。
+
+    Langfuse 的 usage key 是互斥的 bucket：供應商回報的 prompt tokens 含 cache 命中，
+    必須拆成 input（未命中）+ input_cached_tokens（命中），否則命中部分會以
+    一般輸入價計費，成本被高估。
+    """
     if not usage or usage[0] is None:
         return None
     out = usage[0] or 0
     inp = usage[1] or 0
-    return {"input": inp, "output": out, "total": out + inp}
+    details = {"input": inp, "output": out, "total": out + inp}
+    if cache_hit:
+        hit = min(int(cache_hit), inp)
+        details["input"] = inp - hit
+        details["input_cached_tokens"] = hit
+    return details
+
+
+def _generation_metadata(agent: "Agent", thinking_parts: list[str]) -> dict:
+    """generation metadata 一次給齊（SDK update 是整批覆蓋）。"""
+    meta: dict = {"backend": agent.profile.backend}
+    if thinking_parts:
+        meta["thinking"] = "".join(thinking_parts)[:2000]
+    return meta
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _generation_messages(agent: "Agent", messages: list) -> "list | None":
@@ -89,10 +112,19 @@ async def stream_ollama(
     on_retry,
 ) -> None:
     """Ollama 串流，含 XML 解析錯誤自動重試。"""
+    _first_token_at: "datetime | None" = None
     with generation(
-        name="llm-ollama",
+        name=GENERATION_NAME,
         model=agent.profile.name,
         input=_generation_messages(agent, messages),
+        model_parameters={
+            "num_ctx": agent.profile.num_ctx,
+            "temperature": _cfg.TEMPERATURE,
+            "top_k": _cfg.TOP_K,
+            "top_p": _cfg.TOP_P,
+            "think": agent.profile.supports_thinking,
+        },
+        metadata={"backend": agent.profile.backend},
     ) as gen:
         try:
             _xml_retry = 0
@@ -123,6 +155,8 @@ async def stream_ollama(
                             break
                         msg = chunk.message
                         agent._last_usage = (getattr(chunk, "eval_count", None), getattr(chunk, "prompt_eval_count", None))
+                        if _first_token_at is None and (msg.thinking or msg.content or msg.tool_calls):
+                            _first_token_at = _now()
 
                         if msg.thinking:
                             thinking_parts.append(clean_thinking(msg.thinking))
@@ -156,8 +190,9 @@ async def stream_ollama(
                 # ChatML 訊息陣列（含 tool_calls），Session 視圖才能把這一步串進對話
                 gen.update(
                     output=generation_output("".join(reply_parts), tool_calls),
-                    metadata={"thinking": "".join(thinking_parts)[:2000]} if thinking_parts else None,
+                    metadata=_generation_metadata(agent, thinking_parts),
                     usage_details=_usage_details(agent._last_usage),
+                    completion_start_time=_first_token_at,
                 )
 
 
@@ -175,14 +210,22 @@ async def stream_openai_compat(
     """OpenAI-compatible 串流（Gemini / DeepSeek）。"""
     from openai import NOT_GIVEN, RateLimitError
 
+    _first_token_at: "datetime | None" = None
+    is_deepseek = agent.profile.backend == "deepseek"
+    agent._last_cache_hit = None  # 每次呼叫重算，避免沿用上一輪的命中數
     with generation(
-        name="llm-openai-compat",
+        name=GENERATION_NAME,
         model=agent.profile.name,
         input=_generation_messages(agent, messages),
+        model_parameters={
+            "temperature": _cfg.TEMPERATURE,
+            "top_p": _cfg.TOP_P,
+            "thinking": bool(is_deepseek and agent.profile.supports_thinking),
+        },
+        metadata={"backend": agent.profile.backend},
     ) as gen:
         try:
             messages = _to_openai_messages(messages)
-            is_deepseek = agent.profile.backend == "deepseek"
             extra: dict = {}
             if is_deepseek and agent.profile.supports_thinking:
                 extra["extra_body"] = {"thinking": {"type": "enabled"}}
@@ -214,6 +257,8 @@ async def stream_openai_compat(
                     hit = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
                     if hit is None and getattr(chunk.usage, "model_extra", None):
                         hit = chunk.usage.model_extra.get("prompt_cache_hit_tokens")
+                    if hit is None:  # OpenAI / Gemini 形式
+                        hit = getattr(getattr(chunk.usage, "prompt_tokens_details", None), "cached_tokens", None)
                     if hit is not None:
                         agent._last_cache_hit = hit
                 if not chunk.choices:
@@ -225,6 +270,9 @@ async def stream_openai_compat(
                     if getattr(delta, "model_extra", None)
                     else None
                 )
+                # 首個實質輸出（思考 / 文字 / 工具呼叫）才算首 token；第一個 chunk 常只帶 role
+                if _first_token_at is None and (reasoning or delta.content or delta.tool_calls):
+                    _first_token_at = _now()
                 if reasoning:
                     thinking_parts.append(reasoning)
 
@@ -256,6 +304,7 @@ async def stream_openai_compat(
                 # ChatML 訊息陣列（含 tool_calls），Session 視圖才能把這一步串進對話
                 gen.update(
                     output=generation_output("".join(reply_parts), tool_calls),
-                    metadata={"thinking": "".join(thinking_parts)[:2000]} if thinking_parts else None,
-                    usage_details=_usage_details(agent._last_usage),
+                    metadata=_generation_metadata(agent, thinking_parts),
+                    usage_details=_usage_details(agent._last_usage, agent._last_cache_hit),
+                    completion_start_time=_first_token_at,
                 )

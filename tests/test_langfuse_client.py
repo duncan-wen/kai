@@ -313,3 +313,91 @@ def test_generation_output_is_chatml_array():
     assert out[0]["role"] == "assistant"
     assert len(out[0]["content"]) == lf.MESSAGE_MAX_CHARS
     assert "tool_calls" not in out[0]
+
+
+# ── 稽核修正（fix/langfuse-audit） ─────────────────────────────────
+
+
+def test_usage_details_splits_cache_hit_into_exclusive_bucket():
+    """cache 命中要從 input 扣掉放進 input_cached_tokens（Langfuse bucket 互斥），total 不變。"""
+    assert _usage_details((100, 1000), cache_hit=900) == {
+        "input": 100,
+        "input_cached_tokens": 900,
+        "output": 100,
+        "total": 1100,
+    }
+
+
+def test_usage_details_cache_hit_zero_or_none_keeps_plain_input():
+    assert _usage_details((10, 50), cache_hit=0) == {"input": 50, "output": 10, "total": 60}
+    assert _usage_details((10, 50), cache_hit=None) == {"input": 50, "output": 10, "total": 60}
+
+
+def test_usage_details_cache_hit_clamped_to_input():
+    out = _usage_details((10, 50), cache_hit=80)
+    assert out["input"] == 0 and out["input_cached_tokens"] == 50
+
+
+def test_mask_secrets_known_env_value(monkeypatch):
+    monkeypatch.setenv("MY_SERVICE_API_KEY", "abcd1234efgh5678")
+    out = lf.mask_secrets(data={"result": "key is abcd1234efgh5678 ok"})
+    assert out == {"result": f"key is {lf.MASK} ok"}
+
+
+def test_mask_secrets_token_patterns():
+    text = (
+        "pk-lf-5e4cdd2f-fbe2-4961 sk-abcdefghijklmnop1234 "
+        "AIzaSyA1234567890abcdefghijklmnopqrstu Bearer abcdefghijklmnopqrstuv"
+    )
+    out = lf.mask_secrets(data=text)
+    assert "pk-lf-5e4c" not in out
+    assert "sk-abcdef" not in out
+    assert "AIzaSy" not in out
+    assert "abcdefghijklmnopqrstuv" not in out
+
+
+def test_mask_secrets_env_file_assignment_keeps_name():
+    out = lf.mask_secrets(data="GEMINI_API_KEY=xyz-secret-value\nMODEL=qwen3")
+    assert out == f"GEMINI_API_KEY={lf.MASK}\nMODEL=qwen3"
+
+
+def test_mask_secrets_json_assignment():
+    out = lf.mask_secrets(data='{"api_key": "hunter22", "name": "x"}')
+    assert "hunter22" not in out and '"name": "x"' in out
+
+
+def test_mask_secrets_leaves_token_counts_alone():
+    """usage / 設定裡的 token 數字不是密鑰，不該被遮。"""
+    text = "input_tokens: 16918\nMAX_TOKENS=4096\nmax_tokens: 2048"
+    assert lf.mask_secrets(data=text) == text
+
+
+def test_mask_secrets_keeps_chatml_structure():
+    msgs = [{"role": "assistant", "content": "", "tool_calls": [
+        {"id": "call_1", "type": "function", "function": {"name": "bash_exec", "arguments": "{}"}},
+    ]}]
+    assert lf.mask_secrets(data=msgs) == msgs
+
+
+def test_record_result_marks_errors():
+    from core.tools.dispatch import _record_result
+    from core.tools.result import ToolResult
+
+    class _Obs:
+        def __init__(self):
+            self.kw = None
+
+        def update(self, **kw):
+            self.kw = kw
+
+    ok, bad = _Obs(), _Obs()
+    _record_result(ok, ToolResult("t", "fine"))
+    _record_result(bad, ToolResult("t", "[Error] boom", is_error=True))
+    assert "level" not in ok.kw
+    assert bad.kw["level"] == "ERROR"
+    assert bad.kw["status_message"] == "[Error] boom"
+    _record_result(None, ToolResult("t", "x"))  # 未啟用時不炸
+
+
+def test_generation_name_is_backend_agnostic():
+    assert lf.GENERATION_NAME == "generate-response"

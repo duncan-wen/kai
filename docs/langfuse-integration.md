@@ -37,15 +37,16 @@ mixins/streaming.py ─▶ Agent.chat() ─▶ _run_turn() ─▶ core/backends.
 - helper：`trace()` / `generation()` / `tool()` / `agent()`（封裝 Langfuse SDK `start_as_current_observation`）
 - `flush()`：app 關閉時呼叫
 - `_ascii_session_id()`：session id 非 ASCII（如中文）轉 sha1，滿足 `propagate_attributes` 的 US-ASCII 限制
-- `_mask_args()`：遮罩 key/secret/token/api 等敏感參數
+- `_mask_args()`：依欄位名遮罩工具參數中的 key/secret/token/api
+- `mask_secrets()`：Langfuse client 的 `mask` hook，所有上傳資料（含工具輸出）依「值」遮罩：環境變數中的密鑰原值、常見憑證格式（`sk-`、`pk-lf-`、`AIza`、`ghp_`、Bearer…）、`*_API_KEY=` / `"api_key":` 賦值
 
 ### 2. 埋點位置
 
 | 位置 | 層級 | 名稱 / 記錄內容 |
 |------|------|----------------|
 | `core/agent.py::chat` | trace span | `chat-turn`：session_id、model、input（user 文字）、output（reply） |
-| `core/backends.py::stream_ollama` | generation | `llm-ollama`：model、input / output（ChatML 訊息陣列，含 tool_calls）、metadata.thinking、usage |
-| `core/backends.py::stream_openai_compat` | generation | `llm-openai-compat`：同上 |
+| `core/backends.py::stream_ollama` | generation | `generate-response`：model、model_parameters、input / output（ChatML 訊息陣列，含 tool_calls）、metadata（backend、thinking）、usage、completion_start_time |
+| `core/backends.py::stream_openai_compat` | generation | `generate-response`：同上，usage 另拆出 `input_cached_tokens` |
 | `core/tools/dispatch.py::run_tool` | tool | tool name、args（遮罩後）、result |
 | `core/tools/dispatch.py`（subagent dispatch） | **agent** | `send_to_agent` / `load_agent` 等 → type 為 `agent`，Agent Graph 顯示子 agent 節點 |
 | `core/agent.py::compact_history` | generation | 摘要該次用量 |
@@ -81,10 +82,10 @@ registry 已註冊 `langfuse_public_key` / `langfuse_secret_key` / `langfuse_bas
 |------|------|
 | Model name | ✅ `deepseek-v4-pro` |
 | Token usage | ✅ `usage_details: {input, output, total}` |
-| 描述性 trace name | ✅ `chat-turn` / `llm-ollama` / `llm-openai-compat` |
+| 描述性 trace name | ✅ `chat-turn` / `generate-response`（動作命名，不含模型或後端） |
 | Span hierarchy（單一 parent 嵌套） | ✅ trace → generation → tool/agent |
 | Correct observation types | ✅ generation / tool / **agent** 四型態正確 |
-| Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
+| Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數、`mask_secrets` 遮罩所有上傳值；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
 | Capture thinking | ✅ generation metadata 含 thinking |
 | session_id 分組 | ✅ 命名 / 未命名（時間戳 fallback）皆可區分 |
 
@@ -179,12 +180,34 @@ history」「Match tool calls to results」）。原本的 generation I/O 三處
 | `generation_output()` | output 改為 `[{"role": "assistant", "content", "tool_calls"}]`，與下一輪 input 裡的同一則訊息完全一致 |
 | `core/backends.py` | input 直接傳訊息陣列（不再包 `{"messages": ...}`）；thinking 移到 generation metadata |
 
+## 稽核修正 — 2026-11-23（`fix/langfuse-audit`）
+
+對照官方「What does a good trace look like?」與 Token & Cost Tracking 文件稽核後的修正：
+
+| # | 問題 | 修法 |
+|---|------|------|
+| 1 | **成本高估**：DeepSeek 的 `prompt_cache_hit_tokens` 只寫 log，usage 全以一般輸入價計 | `_usage_details(usage, cache_hit)` 拆成互斥 bucket：`input`（未命中）+ `input_cached_tokens`（命中）；每次呼叫重置 `_last_cache_hit`；也支援 OpenAI / Gemini 的 `prompt_tokens_details.cached_tokens` |
+| 2 | **工具輸出未遮罩**：`cat .env` 之類的輸出會原文進 tool span 與下一輪 generation input | `Langfuse(mask=mask_secrets)`，對所有上傳值做值層級遮罩 |
+| 3 | **工具失敗未標記** | `_record_result()`：`ToolResult.is_error` → `level="ERROR"` + `status_message` |
+| 4 | **generation 以後端命名**（`llm-ollama` / `llm-openai-compat`），換模型就斷篩選 | 統一 `generate-response`，後端記在 `metadata.backend` |
+| 5 | 缺屬性 | `completion_start_time`（首個實質輸出時間）、`model_parameters`（temperature / top_p / top_k / num_ctx / thinking）、`environment`（`LANGFUSE_TRACING_ENVIRONMENT`，預設 `development`）、`user_id`（`USERNAME`，非 ASCII 轉 sha1） |
+
+**端到端驗證**（送出真實 trace 後以 v2 observations API 取回）：
+
+- `DEMO_API_KEY=supersecretvalue99` 在 tool output 顯示為 `DEMO_API_KEY=***`，整份 payload 搜不到原值
+- usage 例：`input 141 / input_cached_tokens 3456 / output 48`，cache 以 `deepseek-flash` 定價表的 `input_cached_tokens`（$0.006/M）計價
+- `exit 3` 的 tool span 為 `level=ERROR`、`statusMessage="[exit code 3]…"`
+- `environment=development`、`userId` 已帶上，`completionStartTime` 有值
+  （v2 API 的 `timeToFirstToken` 衍生欄位仍為 null，原始時間要用 `fields=time` 取）
+
+> ⚠️ generation 名稱變更：既有以 `llm-ollama` / `llm-openai-compat` 篩選的 view / evaluator 要改成 `generate-response`。
+
 ## 已知注意事項
 
 - **Langfuse Cloud v3 read API 已棄用**（2026-11-16，`GET /api/public/traces` 回 410）。**不影響 SDK 寫入**，只影響讀取；讀取請用 v2（`iter_observation_pages`）或 langfuse-cli。
 - **重啟生效**：埋點在程式碼（`agent.py` / `backends.py` / `dispatch.py`），改動後需完全重啟 kai，`/reload-config` 不重載程式碼。
 - **flush**：app 退出時呼叫 `flush()`，否則最後幾個 span 會掉。
-- **隱私**：tool result 經 `_mask_args` 遮罩；system prompt 每 turn 僅首輪記錄全文（截斷 6000 字），後續輪次只放佔位符。要完全排除請設 `LANGFUSE_TRACE_SYSTEM_PROMPT=false`。
+- **隱私**：tool 參數經 `_mask_args`、所有上傳值經 `mask_secrets` 遮罩；system prompt 每 turn 僅首輪記錄全文（截斷 6000 字），後續輪次不放 system。要完全排除請設 `LANGFUSE_TRACE_SYSTEM_PROMPT=false`。
 
 ## 安裝
 
