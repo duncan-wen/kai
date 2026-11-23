@@ -360,21 +360,76 @@ def test_sessions_of_different_history_files_are_independent(tmp_path: Path) -> 
 # ── session_id（Langfuse 分組用） ──────────────────────────────────────────────
 
 
-def test_session_id_named_returns_name(tmp_path: Path) -> None:
-    """命名過的 session：session_id 直接用 session 名稱（非 history 檔名）。"""
+def test_session_id_stable_across_saves(tmp_path: Path) -> None:
+    """同一個 session 每輪重寫 history 檔，ID 仍不變（st_ctime 每次寫入都會變）。"""
     hf = tmp_path / "history.json"
     write_session(hf, "hi")
-    store = SessionStore(hf)
-    store.rename("台股分析師")
-    assert store.session_id == "台股分析師"
+    sid = SessionStore(hf).session_id
+    assert sid.startswith("kai-")
+    write_session(hf, "hi", "again")  # 模擬下一輪 save_history
+    assert SessionStore(hf).session_id == sid
 
 
-def test_session_id_unnamed_uses_stable_ctime(tmp_path: Path) -> None:
-    """未命名 session：用 history 檔建立時間，同 session 跨 turn 穩定。"""
+def test_session_id_not_changed_by_rename(tmp_path: Path) -> None:
+    """命名不影響 ID：中途 /rename 不會把觀測 session 切成兩段，同名 session 也不會合併。"""
     hf = tmp_path / "history.json"
     write_session(hf, "hi")
     store = SessionStore(hf)
     sid = store.session_id
-    assert sid.startswith("history-")
-    # 同一個 history 檔（同 session）重複查詢結果一致
+    store.rename("台股分析師")
+    assert store.session_id == sid
+
+
+def test_session_id_new_after_cls(tmp_path: Path) -> None:
+    """/cls 之後是新的 session → 新 ID。"""
+    hf = tmp_path / "history.json"
+    write_session(hf, "A")
+    first = SessionStore(hf).session_id
+    SessionStore(hf).close()
+    write_session(hf, "B")
+    assert SessionStore(hf).session_id != first
+
+
+def test_session_id_restored_on_resume(tmp_path: Path) -> None:
+    """/resume 叫回 archive → 接續原本的 ID；再新增對話後封存也沿用。"""
+    hf = tmp_path / "history.json"
+    write_session(hf, "A")
+    original = SessionStore(hf).session_id
+    arch = SessionStore(hf).close().archive
+
+    write_session(hf, "B")
+    other = SessionStore(hf).session_id
+    SessionStore(hf).resume(arch)  # 先封存 B，再叫回 A
+    store = SessionStore(hf)
+    assert store.session_id == original
+    store.mark_active()  # 送出新訊息
+    assert store.session_id == original
+    new_arch = store.close().archive
+    write_session(hf, "C")
+    SessionStore(hf).resume(new_arch)
+    assert SessionStore(hf).session_id == original
+    assert other != original
+
+
+def test_session_id_resume_legacy_archive_gets_new_id(tmp_path: Path) -> None:
+    """沒有 ID 紀錄的舊 archive：resume 後產生新 ID，並在封存時記下來。"""
+    hf = tmp_path / "history.json"
+    write_session(hf, "old")
+    arch = SessionStore(hf).close().archive  # 從未取用 session_id → 沒有紀錄
+    SessionStore(hf).resume(arch)
+    sid = SessionStore(hf).session_id
+    assert sid.startswith("kai-")
+    SessionStore(hf).close()  # resumed 未新增訊息 → discarded，ID 仍記到原 archive
+    SessionStore(hf).resume(arch)
     assert SessionStore(hf).session_id == sid
+
+
+def test_delete_archive_drops_session_id_record(tmp_path: Path) -> None:
+    hf = tmp_path / "history.json"
+    write_session(hf, "A")
+    _ = SessionStore(hf).session_id
+    store = SessionStore(hf)
+    arch = store.close().archive
+    store.delete_archive(arch)
+    ids_file = tmp_path / ".history" / ".session_ids.json"
+    assert arch.name not in json.loads(ids_file.read_text(encoding="utf-8"))

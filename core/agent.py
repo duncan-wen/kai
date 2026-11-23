@@ -24,6 +24,7 @@ from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .langfuse_client import (
+    get_langfuse,
     trace, generation, system_fingerprint, user_message, assistant_message,
 )
 from .session_store import SessionStore
@@ -476,7 +477,14 @@ class Agent:
                 for b in _user_text
                 if isinstance(b, dict) and b.get("type") == "text"
             )
-        session_id = SessionStore(self._history_file).session_id if self._history_file else None
+        # 只在 Langfuse 啟用時才取 session ID（首次取用會在磁碟建立 .session_id）
+        _store = (
+            SessionStore(self._history_file)
+            if self._history_file and get_langfuse() is not None
+            else None
+        )
+        session_id = _store.session_id if _store else None
+        session_name = _store.name if _store else ""
         with trace(
             name="chat-turn",
             session_id=session_id,
@@ -488,6 +496,7 @@ class Agent:
                 "model": self.profile.name,
                 "backend": self.profile.backend,
                 "agent": self.display_name,
+                "session_name": session_name,
             },
         ) as _span:
             try:
@@ -511,6 +520,7 @@ class Agent:
                             "model": self.profile.name,
                             "backend": self.profile.backend,
                             "agent": self.display_name,
+                            "session_name": session_name,
                             "system_sha": system_fingerprint(_sys_text),
                             "system_chars": len(_sys_text),
                             "generations": self._lf_gen_idx,

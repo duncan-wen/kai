@@ -54,12 +54,15 @@ mixins/streaming.py ─▶ Agent.chat() ─▶ _run_turn() ─▶ core/backends.
 
 ### 3. session 分組 — `core/session_store.py`
 
-`SessionStore.session_id` property（session 概念的家，語意正確）：
+`SessionStore.session_id` property（session 概念的家）：
 
-- 已命名 session → 回 session 名（中文由 `_ascii_session_id` 轉 sha1）
-- 未命名 → `history-<history檔 ctime>`，同 session 跨 turn 穩定、可讀且唯一
+- session 第一次取用時產生 `kai-YYYYMMDD-HHMMSS-xxxx`，存進 `.history/.session_id`，整個 session 不變
+- `/cls` 封存時把 ID 記到 `.history/.session_ids.json`（archive 檔名 → ID）；`/resume` 時還原，叫回的對話接續原本的 Langfuse session
+- session 名稱**不**當 ID（中途改名會切段、同名會合併），改放 trace metadata `session_name`
+- 只在 Langfuse 啟用時才取用（不啟用就不會建立 `.session_id`）
 
-> 注意：`_history_file.stem` 對所有 agent 都固定是 `history`，不能用它當 session id（否則全混成一組）。已改用 `SessionStore.session_id`。
+> 歷史教訓：曾用 history 檔的 `st_ctime` 當未命名 session 的 ID。但 Linux 的 ctime 是「最後變更時間」，
+> 每次 `save_history` 都會變 → 幾乎每一輪都是不同 session（實測 37 筆 trace 分散在 33 個 session）。
 
 ### 4. 設定 — `config_registry.py` + `.env`
 
@@ -87,7 +90,7 @@ registry 已註冊 `langfuse_public_key` / `langfuse_secret_key` / `langfuse_bas
 | Correct observation types | ✅ generation / tool / **agent** 四型態正確 |
 | Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數、`mask_secrets` 遮罩所有上傳值；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
 | Capture thinking | ✅ generation metadata 含 thinking |
-| session_id 分組 | ✅ 命名 / 未命名（時間戳 fallback）皆可區分 |
+| session_id 分組 | ✅ 每個 session 一個持久 ID，`/rename` 不影響、`/resume` 接續 |
 
 ## 驗證
 
@@ -136,7 +139,7 @@ chat-turn」。
 
 **設計要點**：`_turn_reply_text(turn_start)` 只看本輪新增訊息，避免工具迴圈被中斷時把
 上一輪的舊回覆誤當成本輪 output（原本 `history[-1]` 在結尾是 tool 訊息時會得到 `None`）。
-session 分組沿用 `SessionStore.session_id`（未命名為 `history-YYYYMMDD-HHMMSS`），
+session 分組沿用 `SessionStore.session_id`（2026-11-23 後改為持久 ID，見上方「session id」），
 因此多個獨立 trace 在 Sessions 頁會串成同一段對話。
 
 **驗證**：`tests/test_langfuse_client.py` 新增 4 個測試（訊息形狀、input 傳遞、只看本輪回覆）；

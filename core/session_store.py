@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 import json
+import secrets
 import shutil
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -89,19 +89,27 @@ class SessionStore:
 
     @property
     def session_id(self) -> str:
-        """穩定的 session 標識：命名 session 回傳名稱；未命名回傳 history 檔建立時間。
+        """session 的穩定 ID（供 Langfuse 等觀測系統分組）。
 
-        供 Langfuse 等觀測系統分組用。注意 self._file.stem 永遠是 "history"
-        （每個 agent 的 history 檔固定名），無法用來區分不同 session。
+        第一次取用時產生 `kai-YYYYMMDD-HHMMSS-xxxx` 並存進 `.session_id`，
+        之後整個 session 期間不變：
+          - 不用 history 檔的時間戳：Linux 的 st_ctime 是「最後變更時間」，
+            每次 save_history 都會變，會讓每一輪都變成不同 session。
+          - 不用 session 名稱：中途 /rename 會把 session 切成兩段，
+            不同 session 同名又會被合併。名稱請放 trace metadata。
+        close() 時把 ID 記到 archive 底下，resume() 時還原，
+        讓叫回的對話接續原本的觀測 session。
         """
-        name = self.name
-        if name:
-            return name
         try:
-            ctime = self._file.stat().st_ctime
+            sid = self._session_id_file.read_text(encoding="utf-8").strip()
         except OSError:
-            ctime = time.time()
-        return datetime.fromtimestamp(ctime).strftime("history-%Y%m%d-%H%M%S")
+            sid = ""
+        if sid:
+            return sid
+        sid = datetime.now().strftime("kai-%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._session_id_file.write_text(sid, encoding="utf-8")
+        return sid
 
     def rename(self, name: str) -> None:
         """為 session 命名；尚未有新對話的 resumed session 直接改來源 archive 的名稱。"""
@@ -128,6 +136,7 @@ class SessionStore:
         if resumed is not None:
             if own_name:
                 self.rename_archive(resumed, own_name)
+            self._remember_session_id(resumed, overwrite=False)
             self._file.unlink(missing_ok=True)
             self._marker.unlink(missing_ok=True)
             self._current_name_file.unlink(missing_ok=True)
@@ -137,6 +146,7 @@ class SessionStore:
         self._dir.mkdir(exist_ok=True)
         archive = self._new_archive_path()
         self._file.rename(archive)
+        self._remember_session_id(archive)
         self._marker.unlink(missing_ok=True)  # 來源 archive 已不存在時殘留的標記
         if own_name:
             self.rename_archive(archive, own_name)
@@ -152,6 +162,10 @@ class SessionStore:
         shutil.copy2(archive, self._file)
         self._dir.mkdir(exist_ok=True)
         self._marker.write_text(archive.name, encoding="utf-8")
+        # 接續原 session 的 ID；舊 archive 沒有紀錄時，session_id 首次取用會產生新的
+        sid = self._read_session_ids().get(archive.name, "")
+        if sid:
+            self._session_id_file.write_text(sid, encoding="utf-8")
         return result
 
     # ── archive 管理 ─────────────────────────────────────────────────────────
@@ -203,6 +217,9 @@ class SessionStore:
         names = self._read_names()
         if names.pop(archive.name, None) is not None:
             self._write_names(names)
+        ids = self._read_session_ids()
+        if ids.pop(archive.name, None) is not None:
+            self._write_session_ids(ids)
 
     # ── internals ────────────────────────────────────────────────────────────
 
@@ -217,6 +234,38 @@ class SessionStore:
     @property
     def _current_name_file(self) -> Path:
         return self._dir / ".current_name"
+
+    @property
+    def _session_id_file(self) -> Path:
+        return self._dir / ".session_id"
+
+    @property
+    def _session_ids_file(self) -> Path:
+        return self._dir / ".session_ids.json"
+
+    def _read_session_ids(self) -> dict[str, str]:
+        try:
+            data = json.loads(self._session_ids_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_session_ids(self, ids: dict[str, str]) -> None:
+        self._dir.mkdir(exist_ok=True)
+        self._session_ids_file.write_text(json.dumps(ids, indent=2), encoding="utf-8")
+
+    def _remember_session_id(self, archive: Path, *, overwrite: bool = True) -> None:
+        """把目前 session 的 ID 記到 archive 底下，並結束目前 session 的 ID。"""
+        try:
+            sid = self._session_id_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            sid = ""
+        if sid:
+            ids = self._read_session_ids()
+            if overwrite or archive.name not in ids:
+                ids[archive.name] = sid
+                self._write_session_ids(ids)
+        self._session_id_file.unlink(missing_ok=True)
 
     def _read_names(self) -> dict[str, str]:
         try:

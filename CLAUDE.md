@@ -192,7 +192,7 @@ When changing directory (via `/cd` or `!cd`):
 
 ### Session history (`/cls` and `/resume`)
 
-All archive lifecycle lives in `core/session_store.py` (`SessionStore(history_file)`); mixins and `ResumeScreen` only notify and re-render. Terms (Session, Archive, Resumed session) are defined in `GLOSSARY.md`; UI text uses the noun "archive" and the verb「封存」, not「歸檔」. State is disk-only, next to each history file (main and every agent tab are independent): `.history/history_<ts>[_N].json`, `.names.json`, `.current_name`, `.resumed_from`. Don't mirror it in UI state.
+All archive lifecycle lives in `core/session_store.py` (`SessionStore(history_file)`); mixins and `ResumeScreen` only notify and re-render. Terms (Session, Archive, Resumed session) are defined in `GLOSSARY.md`; UI text uses the noun "archive" and the verb「封存」, not「歸檔」. State is disk-only, next to each history file (main and every agent tab are independent): `.history/history_<ts>[_N].json`, `.names.json`, `.current_name`, `.resumed_from`, `.session_id` (persistent observability ID of the current session), `.session_ids.json` (archive → session ID, restored on `/resume`). Don't mirror it in UI state.
 
 `/cls` → `close()`: archives `history.json` to `.history/history_YYYYMMDD_HHMMSS[_N].json`; a resumed session with no new messages is discarded instead of re-archived. A resumed session whose source archive no longer exists is treated as a normal session (archived, never silently deleted).
 
