@@ -9,5 +9,5 @@
 | [agent-tool-integration.md](agent-tool-integration.md) | Agent 工具整合模式 |
 | [app-tools-design.md](app-tools-design.md) | App-Level Tools：讓 AI 直接操作 app 功能的設計 |
 | [agent-memory-system.md](agent-memory-system.md) | Agent 記憶體與 System Prompt 機制 |
-| [langfuse-integration.md](langfuse-integration.md) | Langfuse 可觀測性串接（已實作）：埋點架構、路徑比較、落地內容 |
+| [langfuse-integration.md](langfuse-integration.md) | Langfuse 可觀測性（選配）：啟用方式、追蹤內容、遮罩、設計決策 |
 | [skill-system.md](skill-system.md) | Skill 支援（已實作）：漸進揭露概念、雙層目錄、實作架構、分階段成果 |

@@ -1,219 +1,101 @@
-# Langfuse 可觀測性串接 — 已實作
+# Langfuse 可觀測性
 
-> 狀態：**已實作並驗證**（2026-11-23）。本文前半保留原始背景與整合路徑分析，後半為實際落地內容。
+kai 可選配串接 [Langfuse](https://langfuse.com)，追蹤每一輪對話的模型呼叫、工具呼叫、
+token 用量與成本，並在 Langfuse 的 Sessions 頁面重播整段對話。
 
----
+**未安裝 SDK 或未設定金鑰時完全不啟用**，不影響一般使用。
 
-## 背景與動機
-
-kai 的 LLM 呼叫鏈：
-
-```
-mixins/streaming.py ─▶ Agent.chat() ─▶ _run_turn() ─▶ core/backends.py
-                                              ├─ stream_ollama()        (ollama 套件)
-                                              └─ stream_openai_compat() (openai AsyncOpenAI)
-                                              └─ run_tool() → core/tools/*
-```
-
-導入 Langfuse 補上 latency、token 成本、agent 層級 trace 的可視化。
-
-## 整合路徑（定案：手動 SDK 埋點）
-
-| 路徑 | 適合度 | 說明 |
-|------|--------|------|
-| **A. 手動 SDK 埋點** | ✅ 採用 | 兩條 backend 皆自寫串流，ollama 那條 OpenAI 自動整合蓋不到 |
-| B. OpenTelemetry | 備選 | 未採用 |
-| C. OpenAI SDK 自動整合 | ❌ 只蓋一半 | 僅對 stream_openai_compat 有效 |
-
----
-
-## 實際實作
-
-### 1. lazy singleton client — `core/langfuse_client.py`
-
-核心原則「未設憑證 = no-op」，不影響沒使用 langfuse 的使用者：
-
-- `get_langfuse()`：未設憑證回傳 `None`，全專案自動跳過
-- helper：`trace()` / `generation()` / `tool()` / `agent()`（封裝 Langfuse SDK `start_as_current_observation`）
-- `flush()`：app 關閉時呼叫
-- `_ascii_session_id()`：session id 非 ASCII（如中文）轉 sha1，滿足 `propagate_attributes` 的 US-ASCII 限制
-- `_mask_args()`：依欄位名遮罩工具參數中的 key/secret/token/api
-- `mask_secrets()`：Langfuse client 的 `mask` hook，所有上傳資料（含工具輸出）依「值」遮罩：環境變數中的密鑰原值、常見憑證格式（`sk-`、`pk-lf-`、`AIza`、`ghp_`、Bearer…）、`*_API_KEY=` / `"api_key":` 賦值
-
-### 2. 埋點位置
-
-| 位置 | 層級 | 名稱 / 記錄內容 |
-|------|------|----------------|
-| `core/agent.py::chat` | trace span | `chat-turn`：session_id、model、input（user 文字）、output（reply） |
-| `core/backends.py::stream_ollama` | generation | `generate-response`：model、model_parameters、input / output（ChatML 訊息陣列，含 tool_calls）、metadata（backend、thinking）、usage、completion_start_time |
-| `core/backends.py::stream_openai_compat` | generation | `generate-response`：同上，usage 另拆出 `input_cached_tokens` |
-| `core/tools/dispatch.py::run_tool` | tool | tool name、args（遮罩後）、result |
-| `core/tools/dispatch.py`（subagent dispatch） | **agent** | `send_to_agent` / `load_agent` 等 → type 為 `agent`，Agent Graph 顯示子 agent 節點 |
-| `core/agent.py::compact_history` | generation | 摘要該次用量 |
-| `app.py`（退出） | flush | 避免 TUI 退出掉資料 |
-
-### 3. session 分組 — `core/session_store.py`
-
-`SessionStore.session_id` property（session 概念的家）：
-
-- session 第一次取用時產生 `kai-YYYYMMDD-HHMMSS-xxxx`，存進 `.history/.session_id`，整個 session 不變
-- `/cls` 封存時把 ID 記到 `.history/.session_ids.json`（archive 檔名 → ID）；`/resume` 時還原，叫回的對話接續原本的 Langfuse session
-- session 名稱**不**當 ID（中途改名會切段、同名會合併），改放 trace metadata `session_name`
-- 只在 Langfuse 啟用時才取用（不啟用就不會建立 `.session_id`）
-
-> 歷史教訓：曾用 history 檔的 `st_ctime` 當未命名 session 的 ID。但 Linux 的 ctime 是「最後變更時間」，
-> 每次 `save_history` 都會變 → 幾乎每一輪都是不同 session（實測 37 筆 trace 分散在 33 個 session）。
-
-### 4. 設定 — `config_registry.py` + `.env`
+## 啟用
 
 ```bash
-# .env
+uv sync --extra observability     # 安裝 langfuse SDK
+```
+
+在 `.env` 填入金鑰（Langfuse 專案 → Settings → API Keys）：
+
+```bash
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com   # Cloud region；自架改 LANGFUSE_HOST
+LANGFUSE_BASE_URL=https://cloud.langfuse.com   # US：https://us.cloud.langfuse.com，或自架網址
 ```
 
-registry 已註冊 `langfuse_public_key` / `langfuse_secret_key` / `langfuse_base_url` 三 entry。
+調校參數建議放 `.kai/config.json`：
 
----
+| 設定 | 預設 | 說明 |
+|------|------|------|
+| `langfuse_tracing_environment` | `development` | Langfuse 的 environment，用來區隔開發與正式資料 |
+| `langfuse_trace_system_prompt` | `true` | 是否記錄 system prompt（每輪只記第一次模型呼叫）；設 `false` 完全不上傳 |
 
-## 對照官方 best practice（self-audit 已通過）
+改完需**完全重啟 kai**（`/reload-config` 不會重新初始化 Langfuse client）。
 
-對照 `github.com/langfuse/skills` 的 `instrumentation.md` 與 `best-practices` 頁面：
+## 會記錄什麼
 
-| 要求 | 狀態 |
-|------|------|
-| Model name | ✅ `deepseek-v4-pro` |
-| Token usage | ✅ `usage_details: {input, output, total}` |
-| 描述性 trace name | ✅ `chat-turn` / `generate-response`（動作命名，不含模型或後端） |
-| Span hierarchy（單一 parent 嵌套） | ✅ trace → generation → tool/agent |
-| Correct observation types | ✅ generation / tool / **agent** 四型態正確 |
-| Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數、`mask_secrets` 遮罩所有上傳值；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
-| Capture thinking | ✅ generation metadata 含 thinking |
-| session_id 分組 | ✅ 每個 session 一個持久 ID，`/rename` 不影響、`/resume` 接續 |
+每一輪對話是一個 trace，結構如下：
 
-## 驗證
-
-- ✅ pytest **116 全過**（含 session_id、ascii、遮罩、system prompt 策略等單元測試）
-- ✅ ruff 全過
-- ✅ self-audit：送出真實 trace → fetch 回來逐項對照（上表）
-
----
-
-## system prompt 追蹤策略（避免 log 膨脹）
-
-一輪對話若含 tool calling loop，會有多次 LLM 呼叫（`generation` span）。若每次都記完整
-messages，log 會隨輪數線性膨脹；但完全不記又無法還原當下的動態上下文。折衷做法：
-
-| 位置 | 內容 |
-|------|------|
-| `chat-turn` metadata | `system_sha`（sha256 前 12 碼）、`system_chars`、`generations`（本 turn 呼叫次數） |
-| 本 turn **第 1 次** `generation` | 完整 system prompt（截斷 6000 字）+ 本次送給模型的全部非 system 訊息（每則截斷 2000 字） |
-| 本 turn **第 2～N 次** `generation` | 不放 system，只放非 system 訊息（佔位符會被 Session 視圖當成中途插入的 system prompt） |
-
-`system_sha` 讓你能在 dashboard 上直接看出 system prompt 有沒有變（專案記憶、skills 索引
-會隨時間變動），而不必比對全文。實作：`core/langfuse_client.py` 的 `trim_messages` /
-`system_fingerprint`，搭配 `core/backends.py` 的 `_generation_messages`（per-turn 計數
-`agent._lf_gen_idx`，於 `chat()` 開頭重置）。
-
-## Sessions（Messages 視圖）修復 — 2026-11-23
-
-**症狀**：Sessions 頁面看不到任何對話，trace 樹長成「1 個 root 底下掛 1.1～1.6 六個
-chat-turn」。
-
-**兩個根因**：
-
-1. **訊息形狀不合**：Langfuse Sessions 只讀 trace **根節點**的 `input` / `output`，且必須是
-   **`{"role", "content"}` 的陣列**（`[{"role": "user", "content": ...}]`）才渲染成對話泡泡。
-   原本寫的是 `{"user": ...}` / `{"reply": ...}`，所以有資料但渲染不出來。
-2. **巢狀而非獨立 trace**：`chat-turn` 若在已有外層 span 的 context 中被建立，會變成子節點，
-   而 Sessions 只看根節點 → 讀不到。
-
-**修法**：
-
-| 位置 | 改動 |
-|------|------|
-| `core/langfuse_client.py` | 新增 `user_message()` / `assistant_message()` 產生標準訊息**陣列** |
-| `core/langfuse_client.py` `trace()` | 進入前 `attach(Context())` 脫離既有 OTel context，**強制**成為新 trace 根節點，離開時 `detach` |
-| `core/agent.py` `chat()` | `input` 改 `user_message(...)`、`output` 改 `assistant_message(...)`；新增 `_turn_reply_text()` 只取**本輪**最後一則 assistant 訊息 |
-
-**設計要點**：`_turn_reply_text(turn_start)` 只看本輪新增訊息，避免工具迴圈被中斷時把
-上一輪的舊回覆誤當成本輪 output（原本 `history[-1]` 在結尾是 tool 訊息時會得到 `None`）。
-session 分組沿用 `SessionStore.session_id`（2026-11-23 後改為持久 ID，見上方「session id」），
-因此多個獨立 trace 在 Sessions 頁會串成同一段對話。
-
-**驗證**：`tests/test_langfuse_client.py` 新增 4 個測試（訊息形狀、input 傳遞、只看本輪回覆）；
-並以 OTel InMemorySpanExporter 實證外層有 span 時 `chat-turn` 仍為 root（`parent=None`、
-trace_id 不同）。
-
-### 補充：ChatML 解析器只吃陣列（同日修正）
-
-首版 `user_message()` / `assistant_message()` 回傳單一 dict（`{"role": "user", "content": "好"}`），
-Sessions 頁面仍空白 —— 因為 Langfuse 的 ChatML 解析器偵測的是**訊息陣列**，單一 dict 會被視為
-一般 JSON payload 而不做對話渲染。
-
-改成回傳 `list[dict]` 後才正確：
-
-```python
-user_message("好")      # -> [{"role": "user", "content": "好"}]
-assistant_message("嗨")  # -> [{"role": "assistant", "content": "嗨"}]
+```
+chat-turn                 (span)        ← 輸入：使用者訊息；輸出：assistant 回覆
+├── generate-response     (generation)  ← 每次模型呼叫一個
+├── bash_exec             (tool)        ← 每次工具呼叫一個，與觸發它的 generation 同層
+├── generate-response     (generation)
+└── agent:<名稱>          (agent)       ← send_to_agent 委派給分身時
 ```
 
-呼叫端（`agent.py` 的 `input=` / `output=`）不需改動，helpers 已封裝形狀。
-
-### 補充：含 tool call 的 turn 顯示「Thread 1/2/3 — No messages」（同日修正）
-
-**症狀**：沒用工具的對話正常；用了工具的 turn 在 Sessions 頁被拆成多個 thread，每個都是
-「No messages」。
-
-**根因**：Session 視圖是用各 `generation` 的 input / output 重建對話 —— 後一個 generation 的
-input 要**完整重複**前面的訊息，才會被串成同一段（官方 best practice「Repeat the conversation
-history」「Match tool calls to results」）。原本的 generation I/O 三處不符：
-
-1. input 只留**尾部 6 則**：tool loop 越跑越長，開頭（含本輪 user 訊息）被擠掉 → 每輪都像新對話。
-2. input 丟掉 assistant 的 `tool_calls`（content 為空被略過），tool 結果也沒有 `tool_call_id`。
-3. output 是 `{"content": "", "thinking": ...}` 物件而非 ChatML 陣列；呼叫工具那幾輪 content 為空 → No messages。
-
-**修法**：
-
-| 位置 | 改動 |
+| 項目 | 內容 |
 |------|------|
-| `trim_messages()` | 預設不砍尾部（messages 已由 history_keep 限縮）；保留 assistant `tool_calls` 與 tool `tool_call_id`；每則截斷 `MESSAGE_MAX_CHARS`=2000 |
-| `tool_call_dict()` | 各後端 tool call 正規化成 OpenAI 形狀；Ollama 無 id → 以「位置 + 名稱 + 參數」雜湊出決定性 id，tool 結果依序配對 |
-| `generation_output()` | output 改為 `[{"role": "assistant", "content", "tool_calls"}]`，與下一輪 input 裡的同一則訊息完全一致 |
-| `core/backends.py` | input 直接傳訊息陣列（不再包 `{"messages": ...}`）；thinking 移到 generation metadata |
+| Session | 每段對話一個持久 ID（`kai-YYYYMMDD-HHMMSS-xxxx`）；`/rename` 不會切開，`/resume` 會接回原本的 session |
+| User | `USERNAME` 設定值 |
+| `generate-response` | 模型、模型參數（temperature、top_p…）、輸入訊息、輸出（含 tool_calls）、token 用量、首 token 時間；metadata 有 `backend` 與 `thinking` |
+| 成本 | 依 Langfuse 模型定價自動計算；DeepSeek 等的 cache 命中會拆成 `input_cached_tokens`，以 cache 價計費 |
+| 工具 | 參數（敏感欄位遮罩）與結果；失敗時標 `level=ERROR` |
+| `chat-turn` metadata | `model`、`backend`、`agent`、`session_name`、`system_sha`（system prompt 指紋，可追蹤版本變化）、`generations`（本輪模型呼叫次數） |
 
-## 稽核修正 — 2026-11-23（`fix/langfuse-audit`）
+## 在 Langfuse 怎麼看
 
-對照官方「What does a good trace look like?」與 Token & Cost Tracking 文件稽核後的修正：
+- **Sessions**：整段對話依序顯示使用者訊息、工具卡片與 assistant 回覆，失敗的工具旁有紅色標記
+- **Tracing**：點進單一 `chat-turn` 看每一步；每個 `generate-response` 的 input 都包含完整對話脈絡
+  （Langfuse 靠這點串接 Sessions），看單一步驟的決定請看 output 或樹狀結構裡的 tool 節點
+- **篩選**：Level = `ERROR` 找失敗的工具呼叫；metadata `session_name` 找命名過的對話
 
-| # | 問題 | 修法 |
-|---|------|------|
-| 1 | **成本高估**：DeepSeek 的 `prompt_cache_hit_tokens` 只寫 log，usage 全以一般輸入價計 | `_usage_details(usage, cache_hit)` 拆成互斥 bucket：`input`（未命中）+ `input_cached_tokens`（命中）；每次呼叫重置 `_last_cache_hit`；也支援 OpenAI / Gemini 的 `prompt_tokens_details.cached_tokens` |
-| 2 | **工具輸出未遮罩**：`cat .env` 之類的輸出會原文進 tool span 與下一輪 generation input | `Langfuse(mask=mask_secrets)`，對所有上傳值做值層級遮罩 |
-| 3 | **工具失敗未標記** | `_record_result()`：`ToolResult.is_error` → `level="ERROR"` + `status_message` |
-| 4 | **generation 以後端命名**（`llm-ollama` / `llm-openai-compat`），換模型就斷篩選 | 統一 `generate-response`，後端記在 `metadata.backend` |
-| 5 | 缺屬性 | `completion_start_time`（首個實質輸出時間）、`model_parameters`（temperature / top_p / top_k / num_ctx / thinking）、`environment`（`LANGFUSE_TRACING_ENVIRONMENT`，預設 `development`）、`user_id`（`USERNAME`，非 ASCII 轉 sha1） |
+## 隱私與遮罩
 
-**端到端驗證**（送出真實 trace 後以 v2 observations API 取回）：
+上傳前會經過兩層遮罩，但都是**盡力而為**，無法保證攔下所有敏感資料（見 [SECURITY.md](../SECURITY.md)）：
 
-- `DEMO_API_KEY=supersecretvalue99` 在 tool output 顯示為 `DEMO_API_KEY=***`，整份 payload 搜不到原值
-- usage 例：`input 141 / input_cached_tokens 3456 / output 48`，cache 以 `deepseek-flash` 定價表的 `input_cached_tokens`（$0.006/M）計價
-- `exit 3` 的 tool span 為 `level=ERROR`、`statusMessage="[exit code 3]…"`
-- `environment=development`、`userId` 已帶上，`completionStartTime` 有值
-  （v2 API 的 `timeToFirstToken` 衍生欄位仍為 null，原始時間要用 `fields=time` 取）
+1. **工具參數**：欄位名含 key / secret / token / password / api 的值改成 `***`
+2. **所有上傳內容**（含工具輸出、模型 thinking）：
+   - 環境變數中金鑰的原值
+   - 常見憑證格式：`sk-…`、`pk-lf-…`、`AIza…`、`ghp_…`、`Bearer …` 等
+   - 賦值形式 `XXX_API_KEY=…`、`"api_key": "…"`；認出的值會被記住，之後單獨出現也會遮
 
-> ⚠️ generation 名稱變更：既有以 `llm-ollama` / `llm-openai-compat` 篩選的 view / evaluator 要改成 `generate-response`。
+system prompt 可能含專案記憶，每輪只在第一次模型呼叫記錄（截斷 6000 字）；不想上傳請設
+`langfuse_trace_system_prompt: false`。
 
-## 已知注意事項
+## 實作與設計決策（給貢獻者）
 
-- **Langfuse Cloud v3 read API 已棄用**（2026-11-16，`GET /api/public/traces` 回 410）。**不影響 SDK 寫入**，只影響讀取；讀取請用 v2（`iter_observation_pages`）或 langfuse-cli。
-- **重啟生效**：埋點在程式碼（`agent.py` / `backends.py` / `dispatch.py`），改動後需完全重啟 kai，`/reload-config` 不重載程式碼。
-- **flush**：app 退出時呼叫 `flush()`，否則最後幾個 span 會掉。
-- **隱私**：tool 參數經 `_mask_args`、所有上傳值經 `mask_secrets` 遮罩；system prompt 每 turn 僅首輪記錄全文（截斷 6000 字），後續輪次不放 system。要完全排除請設 `LANGFUSE_TRACE_SYSTEM_PROMPT=false`。
+| 位置 | 職責 |
+|------|------|
+| `core/langfuse_client.py` | lazy client、`trace` / `generation` / `tool` / `agent` helper、訊息格式轉換、遮罩 |
+| `core/agent.py::chat` | 建立 `chat-turn` trace |
+| `core/backends.py` | 兩個串流後端各自建立 `generate-response` |
+| `core/tools/dispatch.py` | tool / agent observation 與錯誤標記 |
+| `core/session_store.py` | 持久 session ID |
 
-## 安裝
+這些做法都是踩過問題後定下的，修改前請先確認不會退化：
 
-```bash
-uv add langfuse          # SDK v5（實測 5.2.0）
-```
+- **根節點 I/O 必須是 ChatML 訊息陣列**：`[{"role": "user", "content": …}]`。單一 dict 不會被渲染成對話
+- **`chat-turn` 強制成為新的 trace 根**：進入前切斷既有 OpenTelemetry context，否則在分身委派等情境下會被掛成子節點，Sessions 讀不到
+- **generation input 要完整重複前面的對話**：Sessions 靠「後一次呼叫的 input 包含前面的訊息」串接；不能只留尾部幾則，
+  也要保留 assistant 的 `tool_calls` 與 tool 結果的 `tool_call_id`（Ollama 的 tool call 沒有 id，以內容雜湊出固定 id）
+- **同一則訊息在 output 與後續 input 必須截成一樣**：統一 `MESSAGE_MAX_CHARS`（2000 字）
+- **同輪第 2 次以後的模型呼叫不放 system 訊息**：放佔位文字會被 Sessions 當成對話中途插入的 system prompt
+- **usage 是互斥的 bucket**：供應商回報的 prompt tokens 含 cache 命中，要拆成 `input` + `input_cached_tokens`，否則成本高估
+- **session ID 要持久化**：不能用 history 檔的時間戳（Linux 的 `st_ctime` 每次寫檔都變，會讓每輪都變成新 session），
+  也不能用 session 名稱（改名會切段、同名會合併）
+- **本輪回覆用 user 訊息物件定位**：不能用 history 長度當索引，history 滿了會輪替刪舊訊息，索引會落空
+- **generation 以動作命名**（`generate-response`），不含模型或後端名稱，換模型時篩選條件與 evaluator 才不會失效
+
+## 注意事項
+
+- **flush**：kai 結束時會呼叫 `flush()`；異常終止時最後幾筆可能遺失
+- **讀取 API**：Langfuse Cloud 的舊版讀取 API（`GET /api/public/traces`）已停用，請改用 v2 observations API 或
+  [langfuse-cli](https://langfuse.com/docs/api-and-data-platform/features/cli)；SDK 寫入不受影響
+- **刪除 trace**：Langfuse 的刪除是非同步的，刪除後可能仍會顯示一段時間（通常 15 分鐘內，最長 24 小時）
