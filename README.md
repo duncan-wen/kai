@@ -206,3 +206,5 @@ uv run pytest tests/
 ## 📄 License
 
 [MIT](LICENSE)
+
+第三方內容：`.kai/skills/langfuse/` 取自 [langfuse/skills](https://github.com/langfuse/skills)，著作權屬 Langfuse GmbH，以 MIT 授權（見該目錄的 [LICENSE](.kai/skills/langfuse/LICENSE) 與 [NOTICE.md](.kai/skills/langfuse/NOTICE.md)）。
