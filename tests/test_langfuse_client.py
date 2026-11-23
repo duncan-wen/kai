@@ -224,39 +224,65 @@ def test_trace_passes_message_input_to_sdk(monkeypatch):
 
 
 def test_turn_reply_text_ignores_previous_turns():
-    """只取本輪新增的 assistant 訊息，避免舊回覆被當成本輪輸出。"""
+    """只取本輪 user 訊息之後的 assistant 訊息，避免舊回覆被當成本輪輸出。"""
     from core.agent import Agent
+
+    user = {"role": "user", "content": "新問題"}
 
     class _Stub:
         history = [
             {"role": "user", "content": "舊問題"},
             {"role": "assistant", "content": "舊回覆"},
-            {"role": "user", "content": "新問題"},
+            user,
             {"role": "tool", "content": "工具結果"},
             {"role": "assistant", "content": "新回覆"},
         ]
 
-    assert Agent._turn_reply_text(_Stub(), 2) == "新回覆"
-    assert Agent._turn_reply_text(_Stub(), 4) == "新回覆"
+    assert Agent._turn_reply_text(_Stub(), user) == "新回覆"
 
     class _Interrupted:
         history = [
             {"role": "assistant", "content": "舊回覆"},
-            {"role": "user", "content": "新問題"},
+            user,
             {"role": "tool", "content": "工具結果"},
         ]
 
     # 本輪沒有 assistant（工具迴圈被中斷）→ 空字串，而不是回傳上一輪舊回覆
-    assert Agent._turn_reply_text(_Interrupted(), 1) == ""
+    assert Agent._turn_reply_text(_Interrupted(), user) == ""
 
 
-def test_turn_reply_text_empty_when_no_new_messages():
+def test_turn_reply_text_survives_history_rotation():
+    """history 滿了被 _rotate_history 截掉開頭（長度不變）時，仍取得本輪回覆。"""
+    from core.agent import Agent
+
+    class _A:
+        history_keep = 2
+        history = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "a2"},
+        ]
+
+    a = _A()
+    before = len(a.history)
+    user = {"role": "user", "content": "q3"}
+    a.history.append(user)
+    a.history.append({"role": "assistant", "content": "a3"})
+    Agent._rotate_history(a)
+    assert len(a.history) == before  # 舊做法以長度當索引會落空
+    assert Agent._turn_reply_text(a, user) == "a3"
+
+
+def test_turn_reply_text_empty_when_user_msg_removed():
+    """錯誤 / 取消時 user 訊息被 pop → 空字串，不誤抓舊回覆。"""
     from core.agent import Agent
 
     class _Stub:
         history = [{"role": "assistant", "content": "舊回覆"}]
 
-    assert Agent._turn_reply_text(_Stub(), 1) == ""
+    assert Agent._turn_reply_text(_Stub(), {"role": "user", "content": "x"}) == ""
 
 
 def test_trim_messages_keeps_tool_call_structure_openai():

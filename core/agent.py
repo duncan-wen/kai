@@ -477,7 +477,6 @@ class Agent:
                 if isinstance(b, dict) and b.get("type") == "text"
             )
         session_id = SessionStore(self._history_file).session_id if self._history_file else None
-        _turn_start = len(self.history)
         with trace(
             name="chat-turn",
             session_id=session_id,
@@ -499,7 +498,7 @@ class Agent:
                     model, self._pending_model = self._pending_model, None
                     self._apply_model(model)
                 if _span is not None:
-                    _reply = self._turn_reply_text(_turn_start)
+                    _reply = self._turn_reply_text(user_msg)
                     _sys = next(
                         (m.get("content") for m in self.history if m.get("role") == "system"),
                         "",
@@ -519,14 +518,19 @@ class Agent:
                         },
                     )
 
-    def _turn_reply_text(self, turn_start: int) -> str:
+    def _turn_reply_text(self, user_msg: dict) -> str:
         """本輪最後一則 assistant 訊息（trace output 用）；沒有則空字串。
 
-        只看本輪新增的訊息，避免把上一輪的舊回覆誤當成這一輪的輸出。
+        以本輪 user 訊息物件本身（identity）定位，只看它之後的訊息，
+        避免把上一輪的舊回覆誤當成這一輪的輸出。
+        不能用「turn 開始時的 history 長度」當索引：history 滿了之後
+        `_rotate_history` 會刪掉最舊的訊息，長度不變、索引落空，output 變成空字串。
+        user 訊息被移除（錯誤 / 取消）時回傳空字串。
         """
-        if turn_start >= len(self.history):
+        start = next((i for i, m in enumerate(self.history) if m is user_msg), None)
+        if start is None:
             return ""
-        for m in reversed(self.history[turn_start:]):
+        for m in reversed(self.history[start + 1:]):
             if isinstance(m, dict) and m.get("role") == "assistant":
                 return str(m.get("content") or "")
         return ""
