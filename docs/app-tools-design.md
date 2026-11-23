@@ -91,7 +91,7 @@ Tool 來回只活在 `Agent.chat()` 的局部 `messages` 裡，**不寫入 histo
 | 指令 | 原因 |
 |------|------|
 | `/clear` | 純清畫面，AI 呼叫無意義 |
-| `/cls` | 破壞性（歸檔清空），使用者主導 |
+| `/cls` | 破壞性（封存清空），使用者主導 |
 | `/ask` / `/save` | meta 指令 |
 | `/resume` | 開 modal picker，純 UI |
 | `/debug` / `/think` | 使用者偏好 toggle |

@@ -47,7 +47,7 @@ core/
   tool_log.py       → tool call debug log (append to .kai/tool_calls.log, only when DEBUG_TOOLS=1)
 mixins/             → ChatApp behaviour split into focused mixins (all inherit _MixinBase = ChatApp)
   agents.py         → AgentsMixin: /create-agent, /load-agent, /list-agents, /reload-agent, /delete-agent
-  app_tools.py      → AppToolsMixin: 19 AI-callable app tools (load/create/delete agent, model switch, TTS, MCP…)
+  app_tools.py      → AppToolsMixin: 22 AI-callable app tools (load/create/delete agent, model switch, TTS, MCP…)
   bash.py           → BashMixin: ! command execution
   mcp.py            → MCPMixin: /mcp-list, /mcp-reload, /mcp-add, /mcp-del
   session.py        → SessionMixin: /cd, /compact, /cls, /resume, /model, /rename, /nickname, /reload-config, /init-config
@@ -265,7 +265,7 @@ Add one entry to `REGISTRY` in `core/models.py`:
 | `qwen3.5:4b` | ✓ | ✓ | ✓ | ollama |
 | `gemma4:e2b` | ✓ | ✓ | ✓ | ollama |
 | `gemma4:e4b` | ✓ | ✓ | ✓ | ollama |
-| `deepseek-v4-flash` | ✓ | - | ✓ | deepseek |
+| `deepseek-flash` | ✓ | - | ✓ | deepseek |
 | `deepseek-v4-pro` | ✓ | - | ✓ | deepseek |
 | `gemini-2.0-flash` | - | ✓ | ✓ | gemini |
 | `gemini-2.5-flash` | ✓ | ✓ | ✓ | gemini |

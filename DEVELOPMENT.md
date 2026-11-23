@@ -220,7 +220,7 @@ app.py          ChatApp（組合所有 mixin；事件處理、tab 管理、layou
 mixins/
   streaming.py  _send worker（@work exclusive）、串流回呼、TTS 播放
   agents.py     /create-agent, /load-agent, /list-agents, /reload-agent, /delete-agent
-  app_tools.py  19 個 AI 可呼叫的 app tools（切換模型、TTS、MCP…）
+  app_tools.py  22 個 AI 可呼叫的 app tools（切換模型、TTS、MCP…）
   bash.py       ! 指令執行、!cd 攔截
   mcp.py        /mcp-list, /mcp-add, /mcp-del, /mcp-reload
   session.py    /cd, /compact, /cls, /resume, /model, /nickname, /reload-config…

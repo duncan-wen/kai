@@ -319,9 +319,9 @@ def _rotate_history(self):
 
 ```python
 async def compact_history(self) -> str:
-    # 優先用 gemini-2.0-flash；無 Gemini key 時 fallback 到 deepseek-v4-flash
+    # COMPACT_MODEL 優先；未設時有 Gemini key 用 gemini-2.5-flash，否則 deepseek-flash
     _compact_client = self._gemini or self._deepseek
-    _compact_model = "deepseek-v4-flash" if not self._gemini else "gemini-2.0-flash"
+    _compact_model = _cfg.COMPACT_MODEL or (COMPACT_FALLBACK_DEEPSEEK if not self._gemini and self._deepseek else COMPACT_FALLBACK_GEMINI)
     # 把整段 history 送給摘要模型
     # 回傳摘要文字，取代原有 history（只保留 system + 摘要）
 ```

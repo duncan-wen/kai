@@ -28,11 +28,19 @@
 
 ### 🗣️ 用說的就能操作 Kai 本身
 
-19 個 app tools 讓 AI 直接執行原本要手打的指令：「打開台股分析師」「切到 gemini-2.5-flash」「把 context7 MCP 加進來」，AI 會自己呼叫對應功能。
+22 個 app tools 讓 AI 直接執行原本要手打的指令：「打開台股分析師」「切到 gemini-2.5-flash」「把 context7 MCP 加進來」，AI 會自己呼叫對應功能。
 
 ### 🔗 MCP 原生整合：不只是聊天，是真的能做事
 
 支援 stdio 與 HTTP transport，設定分全域與專案兩層，執行中可以熱重載與增刪。Kai 會偵測掛上了哪些 MCP 工具（filesystem、browser、[RepoMapper](https://github.com/pdavis68/RepoMapper) 等），自動調整 system prompt 裡的使用規則：例如掛上 RepoMapper 後，AI 會先用 repo map 理解專案結構，而不是逐檔 `cat`。
+
+### 📚 Skills：把專業流程打包給 AI
+
+支援 [Claude Skills](https://github.com/anthropics/skills) 格式（`SKILL.md`）。放在 `<專案>/.kai/skills/` 或 `~/.kai/skills/`，AI 平常只看到每個 skill 的一行說明，需要時才用 `use_skill` 載入全文，不佔 context。`/skills` 列出所有 skill，也可以叫 AI 幫你建立新的 skill。
+
+### 🔭 可觀測性：每一輪對話都追得到
+
+選配 [Langfuse](https://langfuse.com)：在 `.env` 填入 `LANGFUSE_*` 金鑰即啟用，每輪對話的模型呼叫、工具呼叫、token 用量與成本（含 cache 命中）都會被追蹤，Sessions 頁面可重播整段對話。上傳前會遮罩常見格式的密鑰；未設定金鑰時完全不啟用。
 
 ### 🧩 不被單一供應商綁架
 
@@ -55,7 +63,7 @@ uv run python app.py                 # 在目前目錄啟動
 uv run python app.py ~/my-project    # 指定工作目錄
 ```
 
-只用雲端模型的話不需要 Ollama：在 `.env` 設 `MODEL=gemini-2.5-flash` 並填入 `GEMINI_API_KEY`。
+只用雲端模型的話不需要 Ollama：在 `.env` 設 `MODEL=gemini-2.5-flash` 並填入 `GEMINI_API_KEY`，或設 `MODEL=deepseek-flash` 並填入 `DEEPSEEK_API_KEY`。
 
 > [!WARNING]
 > **安全須知**：Kai 的 AI 可以**不經確認**直接執行 shell 指令（`bash_exec`），權限等同啟動 Kai 的使用者，沒有沙箱。
@@ -113,7 +121,7 @@ agents/
 | `gemma4:e2b` / `gemma4:e4b` | ✓ | ✓ | ✓ | Ollama |
 | `gemini-2.0-flash` | — | ✓ | ✓ | Gemini API |
 | `gemini-2.5-flash` / `gemini-2.5-pro` | ✓ | ✓ | ✓ | Gemini API |
-| `deepseek-v4-flash` / `deepseek-v4-pro` | ✓ | — | ✓ | DeepSeek API |
+| `deepseek-flash` / `deepseek-v4-pro` | ✓ | — | ✓ | DeepSeek API |
 
 完整清單與新增方式見 `core/models.py`。執行中用 `/model <name>` 切換。
 
@@ -123,13 +131,14 @@ agents/
 |------|------|
 | `/model <name>` | 切換模型（保留對話） |
 | `/think` | 切換 Thinking 模式 |
-| `/cls` | 歸檔並清除對話記憶（`/resume` 可恢復） |
+| `/cls` | 封存並清除對話記憶（`/resume` 可恢復） |
 | `/compact` | 壓縮對話歷史，釋放 context |
 | `/ask <問題>` | 臨時提問，不寫入歷史（`/save` 可事後保存） |
 | `/remember <內容>` | 寫入長期記憶 `.kai/notes.md` |
 | `/image <路徑> [問題]` | 傳圖片給 vision 模型 |
 | `/cd <路徑>` | 切換工作目錄（每個目錄有獨立歷史） |
 | `/tts <engine\|off>` | 切換語音：`edge-tts` `azure-tts` `melotts` `kokoro-api` `kokoro` |
+| `/skills` | 列出所有可用 skill |
 | `!<command>` | 直接執行 shell 指令 |
 
 完整指令與快捷鍵見 [docs/usage.md](docs/usage.md)。
@@ -151,7 +160,7 @@ flowchart TB
         Sub["分身 Agent<br/>各自一個 tab"]
         AppFn["App 功能<br/>開關分身 · 切模型 · MCP · TTS"]
         Main <-->|send_to_agent| Sub
-        Main -.->|19 個 app tools| AppFn
+        Main -.->|22 個 app tools| AppFn
     end
 
     Factory["Agent Factory<br/>/create-agent"] -->|LLM 設計 config.json| Sub
@@ -167,17 +176,18 @@ flowchart TB
 
     Loop --> Backends["模型後端<br/>Ollama 本地模型 · Gemini · DeepSeek"]
 
-    Dispatch --> Builtin["內建工具<br/>web_search · fetch_urls<br/>bash_exec · dify_retrieve"]
+    Dispatch --> Builtin["內建工具<br/>web_search · fetch_urls · bash_exec<br/>dify_retrieve · use_skill · list_skills"]
     Dispatch --> MCP["MCP client<br/>stdio · HTTP"]
     Builtin --> SearXNG[(SearXNG)]
     MCP --> Servers["MCP servers<br/>filesystem · browser · RepoMapper …"]
+    Loop -.->|選配| LF[(Langfuse<br/>追蹤)]
 ```
 
 | 目錄 | 職責 |
 |------|------|
 | `app.py` | 程式入口；`ChatApp` 組合所有 mixin |
 | `core/` | 與 UI 無關的核心：`Agent` 工具呼叫迴圈、模型串流後端、MCP client、Agent Factory、設定、TTS |
-| `core/tools/` | 內建工具：網路搜尋與抓取、bash、Dify RAG，以及 `run_tool` 分派 |
+| `core/tools/` | 內建工具：網路搜尋與抓取、bash、Dify RAG、skills，以及 `run_tool` 分派 |
 | `mixins/` | `ChatApp` 的行為依職責拆分：串流、agent 管理、app tools、session、MCP、bash |
 | `widgets/` | 自訂 Textual 元件：檔案樹、檔案檢視器、聊天訊息、各種對話框 |
 | `prompts/` | Agent Factory 的設計 prompt |
@@ -198,6 +208,8 @@ flowchart TB
 | [harness-architecture.md](docs/harness-architecture.md) | Agent 基礎設施架構 |
 | [agentic-loop.md](docs/agentic-loop.md) | 工具呼叫迴圈的原理與實作 |
 | [app-tools-design.md](docs/app-tools-design.md) | 讓 AI 操作 app 本身的設計 |
+| [skill-system.md](docs/skill-system.md) | Skills：漸進揭露、雙層目錄、建立 skill |
+| [langfuse-integration.md](docs/langfuse-integration.md) | Langfuse 可觀測性：設定、追蹤內容、遮罩 |
 
 ## 🤝 貢獻
 

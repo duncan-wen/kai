@@ -32,8 +32,8 @@ PY
 # 專案層級設定：用回應快的雲端模型、開啟工具卡片
 cat > .kai/config.json <<'JSON'
 {
-  "model": "deepseek-v4-flash",
-  "create_agent_model": "deepseek-v4-flash",
+  "model": "deepseek-flash",
+  "create_agent_model": "deepseek-flash",
   "debug_tools": true
 }
 JSON
