@@ -1,0 +1,26 @@
+name: ✨ 功能建議
+description: 提出新功能或改進的想法
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解決什麼問題
+      description: 描述你遇到的情境或痛點；這比提出解法更重要
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建議的做法
+      description: 你希望 kai 怎麼運作？指令、畫面或設定長什麼樣子？
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考慮過的其他做法
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: 參與意願
+      options:
+        - label: 我願意送 PR 實作這個功能

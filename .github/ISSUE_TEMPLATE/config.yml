@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 回報安全漏洞
+    url: https://github.com/duncan-wen/kai/security/advisories/new
+    about: 安全問題請私下回報，不要開公開 issue
+  - name: 📖 使用手冊
+    url: https://github.com/duncan-wen/kai/blob/main/docs/usage.md
+    about: 指令、設定與常見操作

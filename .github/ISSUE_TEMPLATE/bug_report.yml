@@ -1,0 +1,64 @@
+name: 🐛 Bug 回報
+description: 回報非預期的行為或錯誤
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感謝回報！**安全問題請勿在這裡公開**，改依 [SECURITY.md](https://github.com/duncan-wen/kai/blob/main/SECURITY.md) 私下回報。
+        貼上 log 或設定前，請先刪除 API key 等敏感內容。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 發生了什麼事
+      description: 實際看到的行為，以及你預期應該看到什麼
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 重現步驟
+      placeholder: |
+        1. 啟動 kai，模型設為 …
+        2. 輸入 …
+        3. 看到 …
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: 模型
+      placeholder: 例：qwen3-vl:4b、gemini-2.5-flash、deepseek-flash
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: 後端
+      options:
+        - Ollama（本地）
+        - Gemini API
+        - DeepSeek API
+        - 不確定
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kai 版本或 commit
+      description: 執行 `git rev-parse --short HEAD`
+      placeholder: 例：v0.1.0 或 a1b2c3d
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 作業系統與終端機
+      placeholder: 例：Ubuntu 24.04（WSL2）/ Windows Terminal
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相關 log
+      description: |
+        `.kai/agent_tui.log`，或開 `DEBUG_TOOLS=1` 後的 `.kai/tool_calls.log`（請先移除敏感內容）
+      render: text

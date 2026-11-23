@@ -213,12 +213,15 @@ flowchart TB
 
 ## 🤝 貢獻
 
-歡迎 issue 與 PR。程式風格見 [CONVENTIONS.md](CONVENTIONS.md)，開發說明見 [DEVELOPMENT.md](DEVELOPMENT.md)。送出前請確認：
+歡迎 issue 與 PR！開發環境、PR 流程與 commit 慣例見 [CONTRIBUTING.md](CONTRIBUTING.md)，程式風格見 [CONVENTIONS.md](CONVENTIONS.md)，架構說明見 [DEVELOPMENT.md](DEVELOPMENT.md)。參與即表示同意遵守[行為準則](CODE_OF_CONDUCT.md)。送出前請確認：
 
 ```bash
 uv run ruff check .
+uv run ruff format --check .
 uv run pytest tests/
 ```
+
+版本變更紀錄見 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 📄 License
 
