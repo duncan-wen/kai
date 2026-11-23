@@ -54,6 +54,12 @@ if TYPE_CHECKING:
     from .agent_factory import AgentDefinition
 
 
+
+# /compact 未設 COMPACT_MODEL 時的預設模型；必須是 REGISTRY 內的現行名稱
+# （DeepSeek 曾把 deepseek-v4-flash 更名為 deepseek-flash，寫死舊名會讓 /compact 失敗）
+COMPACT_FALLBACK_DEEPSEEK = "deepseek-flash"
+COMPACT_FALLBACK_GEMINI = "gemini-2.5-flash"
+
 class Agent:
     def __init__(self, model: str, history_file: "Path | None" = None, agent_dir: "Path | None" = None, system_prompt: str | None = None):
         self.profile: ModelProfile = get_profile(model)
@@ -418,7 +424,7 @@ class Agent:
 
         _compact_model = (
             _cfg.COMPACT_MODEL
-            or ("deepseek-v4-flash" if not self._gemini and self._deepseek else "gemini-2.5-flash")
+            or (COMPACT_FALLBACK_DEEPSEEK if not self._gemini and self._deepseek else COMPACT_FALLBACK_GEMINI)
         )
         with generation(
             name="compact-history",

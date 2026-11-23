@@ -441,3 +441,12 @@ def test_mask_secrets_does_not_learn_short_values(monkeypatch):
     monkeypatch.setattr(lf, "_learned_secrets", set())
     lf.mask_secrets(data="password: abcd")
     assert lf.mask_secrets(data="abcd efgh") == "abcd efgh"
+
+
+def test_compact_fallback_models_are_registered():
+    """/compact 的預設模型必須是 REGISTRY 內的現行名稱，避免改名後寫死舊名。"""
+    from core.agent import COMPACT_FALLBACK_DEEPSEEK, COMPACT_FALLBACK_GEMINI
+    from core.models import REGISTRY
+
+    assert REGISTRY[COMPACT_FALLBACK_DEEPSEEK].backend == "deepseek"
+    assert REGISTRY[COMPACT_FALLBACK_GEMINI].backend == "gemini"
