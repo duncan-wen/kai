@@ -44,7 +44,7 @@ mixins/streaming.py ─▶ Agent.chat() ─▶ _run_turn() ─▶ core/backends.
 | 位置 | 層級 | 名稱 / 記錄內容 |
 |------|------|----------------|
 | `core/agent.py::chat` | trace span | `chat-turn`：session_id、model、input（user 文字）、output（reply） |
-| `core/backends.py::stream_ollama` | generation | `llm-ollama`：model、input、output（含 **thinking capture**）、usage |
+| `core/backends.py::stream_ollama` | generation | `llm-ollama`：model、input / output（ChatML 訊息陣列，含 tool_calls）、metadata.thinking、usage |
 | `core/backends.py::stream_openai_compat` | generation | `llm-openai-compat`：同上 |
 | `core/tools/dispatch.py::run_tool` | tool | tool name、args（遮罩後）、result |
 | `core/tools/dispatch.py`（subagent dispatch） | **agent** | `send_to_agent` / `load_agent` 等 → type 為 `agent`，Agent Graph 顯示子 agent 節點 |
@@ -85,7 +85,7 @@ registry 已註冊 `langfuse_public_key` / `langfuse_secret_key` / `langfuse_bas
 | Span hierarchy（單一 parent 嵌套） | ✅ trace → generation → tool/agent |
 | Correct observation types | ✅ generation / tool / **agent** 四型態正確 |
 | Sensitive data masked | ✅ `_mask_args` 遮罩 tool 參數；system prompt 每 turn 僅首輪記錄（可用 `LANGFUSE_TRACE_SYSTEM_PROMPT=false` 完全排除） |
-| Capture thinking | ✅ generation output 含 thinking |
+| Capture thinking | ✅ generation metadata 含 thinking |
 | session_id 分組 | ✅ 命名 / 未命名（時間戳 fallback）皆可區分 |
 
 ## 驗證
@@ -104,8 +104,8 @@ messages，log 會隨輪數線性膨脹；但完全不記又無法還原當下�
 | 位置 | 內容 |
 |------|------|
 | `chat-turn` metadata | `system_sha`（sha256 前 12 碼）、`system_chars`、`generations`（本 turn 呼叫次數） |
-| 本 turn **第 1 次** `generation` | 完整 system prompt（截斷 6000 字）+ 尾部 6 則非 system 訊息 |
-| 本 turn **第 2～N 次** `generation` | `{"role":"system","content":"[same as turn-1 generation]"}` + 尾部 6 則 |
+| 本 turn **第 1 次** `generation` | 完整 system prompt（截斷 6000 字）+ 本次送給模型的全部非 system 訊息（每則截斷 2000 字） |
+| 本 turn **第 2～N 次** `generation` | 不放 system，只放非 system 訊息（佔位符會被 Session 視圖當成中途插入的 system prompt） |
 
 `system_sha` 讓你能在 dashboard 上直接看出 system prompt 有沒有變（專案記憶、skills 索引
 會隨時間變動），而不必比對全文。實作：`core/langfuse_client.py` 的 `trim_messages` /
@@ -156,6 +156,28 @@ assistant_message("嗨")  # -> [{"role": "assistant", "content": "嗨"}]
 ```
 
 呼叫端（`agent.py` 的 `input=` / `output=`）不需改動，helpers 已封裝形狀。
+
+### 補充：含 tool call 的 turn 顯示「Thread 1/2/3 — No messages」（同日修正）
+
+**症狀**：沒用工具的對話正常；用了工具的 turn 在 Sessions 頁被拆成多個 thread，每個都是
+「No messages」。
+
+**根因**：Session 視圖是用各 `generation` 的 input / output 重建對話 —— 後一個 generation 的
+input 要**完整重複**前面的訊息，才會被串成同一段（官方 best practice「Repeat the conversation
+history」「Match tool calls to results」）。原本的 generation I/O 三處不符：
+
+1. input 只留**尾部 6 則**：tool loop 越跑越長，開頭（含本輪 user 訊息）被擠掉 → 每輪都像新對話。
+2. input 丟掉 assistant 的 `tool_calls`（content 為空被略過），tool 結果也沒有 `tool_call_id`。
+3. output 是 `{"content": "", "thinking": ...}` 物件而非 ChatML 陣列；呼叫工具那幾輪 content 為空 → No messages。
+
+**修法**：
+
+| 位置 | 改動 |
+|------|------|
+| `trim_messages()` | 預設不砍尾部（messages 已由 history_keep 限縮）；保留 assistant `tool_calls` 與 tool `tool_call_id`；每則截斷 `MESSAGE_MAX_CHARS`=2000 |
+| `tool_call_dict()` | 各後端 tool call 正規化成 OpenAI 形狀；Ollama 無 id → 以「位置 + 名稱 + 參數」雜湊出決定性 id，tool 結果依序配對 |
+| `generation_output()` | output 改為 `[{"role": "assistant", "content", "tool_calls"}]`，與下一輪 input 裡的同一則訊息完全一致 |
+| `core/backends.py` | input 直接傳訊息陣列（不再包 `{"messages": ...}`）；thinking 移到 generation metadata |
 
 ## 已知注意事項
 

@@ -21,7 +21,7 @@ from openai import AsyncOpenAI
 
 from . import config as _cfg
 from .tools import clean_thinking
-from .langfuse_client import generation, trim_messages
+from .langfuse_client import generation, generation_output, trim_messages
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -60,7 +60,9 @@ def _generation_messages(agent: "Agent", messages: list) -> "list | None":
     """依 turn 內第幾次模型呼叫，決定 trace 的 messages 精簡策略。
 
     每個 turn 的第一次呼叫記完整 system prompt（可還原當下動態上下文），
-    後續 tool calling 輪次只放佔位符，避免 log 隨輪數膨脹。
+    後續 tool calling 輪次完全不放 system，避免 log 隨輪數膨脹。
+    不用佔位符：內容與第一次不同的 system 訊息會被 Session 視圖當成
+    對話中途插入的新 system prompt 顯示出來。
     Langfuse 未啟用時直接回 None，省下 trim 的成本。
     """
     from .langfuse_client import get_langfuse
@@ -72,7 +74,6 @@ def _generation_messages(agent: "Agent", messages: list) -> "list | None":
     return trim_messages(
         messages,
         include_system=first and getattr(_cfg, "LANGFUSE_TRACE_SYSTEM_PROMPT", True),
-        system_placeholder=not first,
     )
 
 
@@ -91,7 +92,7 @@ async def stream_ollama(
     with generation(
         name="llm-ollama",
         model=agent.profile.name,
-        input={"messages": _generation_messages(agent, messages)},
+        input=_generation_messages(agent, messages),
     ) as gen:
         try:
             _xml_retry = 0
@@ -152,11 +153,10 @@ async def stream_ollama(
                     raise
         finally:
             if gen is not None:
-                _out = {"content": "".join(reply_parts)[:2000]}
-                if thinking_parts:
-                    _out["thinking"] = "".join(thinking_parts)[:2000]
+                # ChatML 訊息陣列（含 tool_calls），Session 視圖才能把這一步串進對話
                 gen.update(
-                    output=_out,
+                    output=generation_output("".join(reply_parts), tool_calls),
+                    metadata={"thinking": "".join(thinking_parts)[:2000]} if thinking_parts else None,
                     usage_details=_usage_details(agent._last_usage),
                 )
 
@@ -178,7 +178,7 @@ async def stream_openai_compat(
     with generation(
         name="llm-openai-compat",
         model=agent.profile.name,
-        input={"messages": _generation_messages(agent, messages)},
+        input=_generation_messages(agent, messages),
     ) as gen:
         try:
             messages = _to_openai_messages(messages)
@@ -253,10 +253,9 @@ async def stream_openai_compat(
                 ))
         finally:
             if gen is not None:
-                _out = {"content": "".join(reply_parts)[:2000]}
-                if thinking_parts:
-                    _out["thinking"] = "".join(thinking_parts)[:2000]
+                # ChatML 訊息陣列（含 tool_calls），Session 視圖才能把這一步串進對話
                 gen.update(
-                    output=_out,
+                    output=generation_output("".join(reply_parts), tool_calls),
+                    metadata={"thinking": "".join(thinking_parts)[:2000]} if thinking_parts else None,
                     usage_details=_usage_details(agent._last_usage),
                 )

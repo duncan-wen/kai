@@ -136,8 +136,8 @@ def test_system_fingerprint_stable_and_short():
     assert len(lf.system_fingerprint("abc")) == 12
 
 
-def test_generation_messages_first_turn_then_placeholder(monkeypatch):
-    """同 turn 第一次記完整 system，第二次起用佔位符；計數遞增。"""
+def test_generation_messages_first_turn_then_no_system(monkeypatch):
+    """同 turn 第一次記完整 system，第二次起不放 system（佔位符會在 Session 視圖中途冒出來）；計數遞增。"""
     from core import backends
 
     monkeypatch.setattr(backends, "get_langfuse", None, raising=False)
@@ -152,7 +152,7 @@ def test_generation_messages_first_turn_then_placeholder(monkeypatch):
     first = backends._generation_messages(a, msgs)
     second = backends._generation_messages(a, msgs)
     assert first[0] == {"role": "system", "content": "FULL"}
-    assert second[0] == {"role": "system", "content": lf.SYSTEM_PLACEHOLDER_TEXT}
+    assert second == [{"role": "user", "content": "hi"}]
     assert a._lf_gen_idx == 2
 
 
@@ -257,3 +257,59 @@ def test_turn_reply_text_empty_when_no_new_messages():
         history = [{"role": "assistant", "content": "舊回覆"}]
 
     assert Agent._turn_reply_text(_Stub(), 1) == ""
+
+
+def test_trim_messages_keeps_tool_call_structure_openai():
+    """OpenAI 形狀的 tool calling 訊息保留 tool_calls 與 tool_call_id（Session 視圖配對用）。"""
+    msgs = [
+        {"role": "user", "content": "查天氣"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "w", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "晴"},
+    ]
+    out = lf.trim_messages(msgs)
+    assert out[1] == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "w", "arguments": "{}"}}],
+    }
+    assert out[2] == {"role": "tool", "content": "晴", "tool_call_id": "c1"}
+
+
+def test_trim_messages_ollama_tool_calls_get_matching_ids():
+    """Ollama tool call 無 id：合成的 id 要與 generation_output 一致，tool 結果依序配對。"""
+    from types import SimpleNamespace
+
+    calls = [
+        SimpleNamespace(function=SimpleNamespace(name="a", arguments={"x": 1})),
+        SimpleNamespace(function=SimpleNamespace(name="b", arguments={})),
+    ]
+    msgs = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": calls},
+        {"role": "tool", "content": "ra", "name": "a"},
+        {"role": "tool", "content": "rb", "name": "b"},
+    ]
+    out = lf.trim_messages(msgs)
+    produced = lf.generation_output("", calls)[0]["tool_calls"]
+    assert out[1]["tool_calls"] == produced
+    assert out[2]["tool_call_id"] == produced[0]["id"]
+    assert out[3]["tool_call_id"] == produced[1]["id"]
+    assert produced[0]["id"] != produced[1]["id"]
+
+
+def test_trim_messages_no_tail_cut_by_default():
+    """預設不砍尾部：後續 generation 必須完整重複前面的對話，Session 視圖才串得起來。"""
+    msgs = [{"role": "user", "content": str(i)} for i in range(20)]
+    assert len(lf.trim_messages(msgs)) == 20
+
+
+def test_generation_output_is_chatml_array():
+    out = lf.generation_output("x" * (lf.MESSAGE_MAX_CHARS + 10))
+    assert isinstance(out, list)
+    assert out[0]["role"] == "assistant"
+    assert len(out[0]["content"]) == lf.MESSAGE_MAX_CHARS
+    assert "tool_calls" not in out[0]

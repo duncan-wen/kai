@@ -206,21 +206,78 @@ def _flatten_content(content: Any) -> str:
     return str(content or "")
 
 
+MESSAGE_MAX_CHARS = 2000
+"""generation input 每則訊息與 generation output 共用的截斷長度。
+
+Session 視圖靠「後一個 generation 的 input 重複前面的訊息」把對話串起來，
+所以同一則訊息在 output 與之後的 input 必須截成一模一樣的文字。
+"""
+
+
+def _get(obj: Any, key: str, default: Any = None) -> Any:
+    """同時支援 dict 與物件屬性（ollama ToolCall / SimpleNamespace）。"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def tool_call_dict(tc: Any, index: int = 0) -> dict:
+    """把各後端的 tool call 正規化成 OpenAI 形狀，供 Langfuse ChatML 解析。
+
+    Ollama 的 tool call 沒有 id：以「名稱 + 參數 + 在該則訊息中的位置」雜湊出
+    決定性的 id，讓 generation output 與下一輪 input 裡的同一個呼叫拿到相同 id，
+    tool 結果也才對得上。
+    """
+    import hashlib
+    import json
+
+    fn = _get(tc, "function") or {}
+    name = str(_get(fn, "name", "") or "")
+    args = _get(fn, "arguments", "")
+    if not isinstance(args, str):
+        args = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+    tc_id = _get(tc, "id")
+    if not tc_id:
+        digest = hashlib.sha1(f"{index}\x00{name}\x00{args}".encode("utf-8")).hexdigest()[:12]
+        tc_id = f"call_{digest}"
+    return {
+        "id": str(tc_id),
+        "type": "function",
+        "function": {"name": name, "arguments": args[:MESSAGE_MAX_CHARS]},
+    }
+
+
+def generation_output(content: str, tool_calls: Optional[list] = None) -> list[dict]:
+    """generation output 的 ChatML 形狀：單則 assistant 訊息（含 tool_calls）的陣列。
+
+    與 trim_messages 對同一則 assistant 訊息產生的結果一致，Session 視圖才串得起來。
+    """
+    msg: dict = {"role": "assistant", "content": (content or "")[:MESSAGE_MAX_CHARS]}
+    if tool_calls:
+        msg["tool_calls"] = [tool_call_dict(tc, i) for i, tc in enumerate(tool_calls)]
+    return [msg]
+
+
 def trim_messages(
     messages: list,
-    limit: int = 6,
-    max_chars: int = 400,
+    limit: Optional[int] = None,
+    max_chars: int = MESSAGE_MAX_CHARS,
     *,
     include_system: bool = False,
     system_placeholder: bool = False,
     system_max_chars: int = 6000,
 ) -> list[dict]:
-    """把 messages 轉成可安全追蹤的精簡形式。
+    """把 messages 轉成可安全追蹤的 ChatML 形式。
 
-    預設排除 system prompt（可能含專案記憶等敏感內容）、每則截斷、只留尾部數則，
-    避免把完整 history 與敏感上下文灌進 Langfuse。
+    預設排除 system prompt（可能含專案記憶等敏感內容）、每則截斷 max_chars。
+    不預設砍尾部：messages 已由 history_keep 限縮，而 Session 視圖要求每個
+    generation 的 input 完整重複前面的對話，砍掉開頭會讓 tool calling 的
+    各輪被拆成互不相連、渲染不出訊息的 thread。
 
-    多輪 tool calling loop 的取捨（既不膨脹又能還原當下上下文）：
+    tool calling 訊息保留結構：assistant 的 tool_calls（含 id）與 tool 結果的
+    tool_call_id，讓 Session 視圖能把工具呼叫與結果配對。
+
+    多輪 tool calling loop 的取捨：
       include_system=True     → 開頭放完整 system prompt（截斷 system_max_chars），
                                 用於每個 turn 的第一次模型呼叫
       system_placeholder=True → 開頭放佔位符「同本 turn 第一次呼叫」，
@@ -244,12 +301,30 @@ def trim_messages(
             head.append({"role": "system", "content": SYSTEM_PLACEHOLDER_TEXT})
 
     body: list[dict] = []
+    pending_ids: list[str] = []  # Ollama 的 tool 結果沒有 tool_call_id，依序對應前一則的呼叫
     for m in messages:
         if not isinstance(m, dict):
             continue
-        if m.get("role") == "system":
+        role = m.get("role")
+        if role == "system":
             continue
-        text = _flatten_content(m.get("content"))
+        text = _flatten_content(m.get("content"))[:max_chars]
+        if role == "assistant" and m.get("tool_calls"):
+            calls = [tool_call_dict(tc, i) for i, tc in enumerate(m["tool_calls"])]
+            pending_ids = [c["id"] for c in calls]
+            body.append({"role": "assistant", "content": text, "tool_calls": calls})
+            continue
+        if role == "tool":
+            tc_id = m.get("tool_call_id") or (pending_ids.pop(0) if pending_ids else None)
+            tool_msg: dict = {"role": "tool", "content": text}
+            if tc_id:
+                tool_msg["tool_call_id"] = tc_id
+            if m.get("name"):
+                tool_msg["name"] = m["name"]
+            body.append(tool_msg)
+            continue
         if text:
-            body.append({"role": m.get("role"), "content": text[:max_chars]})
-    return head + body[-limit:]
+            body.append({"role": role, "content": text})
+    if limit is not None:
+        body = body[-limit:]
+    return head + body
