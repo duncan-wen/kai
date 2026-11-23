@@ -57,6 +57,11 @@ uv run python app.py ~/my-project    # 指定工作目錄
 
 只用雲端模型的話不需要 Ollama：在 `.env` 設 `MODEL=gemini-2.5-flash` 並填入 `GEMINI_API_KEY`。
 
+> [!WARNING]
+> **安全須知**：Kai 的 AI 可以**不經確認**直接執行 shell 指令（`bash_exec`），權限等同啟動 Kai 的使用者，沒有沙箱。
+> 網頁或檔案內容可能透過提示注入誘導它執行危險指令；在某個目錄啟動 Kai 時，該目錄 `.kai/mcp_servers.json` 裡的 MCP server 也會自動執行。
+> 建議在容器或低權限帳號中使用、不要在不信任的 repo 裡啟動。完整說明與漏洞回報方式見 [SECURITY.md](SECURITY.md)。
+
 ## 🏭 Agent Factory
 
 ```
