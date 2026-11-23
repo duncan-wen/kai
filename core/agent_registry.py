@@ -3,6 +3,7 @@
 負責：配 tab id、記錄作用中的 Agent、依名稱查找、分發 MCP client。
 不依賴 Textual；UI 只負責把 registry 的狀態畫出來。
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -53,7 +54,9 @@ class AgentRegistry:
 
     def find_by_dir(self, agent_dir: "Path") -> str | None:
         """已開啟同一個 agent 目錄的 tab id（/load-agent 去重用）。"""
-        return next((tid for tid, a in self._tabs.items() if a._agent_dir == agent_dir), None)
+        return next(
+            (tid for tid, a in self._tabs.items() if a._agent_dir == agent_dir), None
+        )
 
     def find(self, query: str) -> str:
         """依名稱找 Agent，回傳 tab id。
@@ -76,13 +79,17 @@ class AgentRegistry:
         if len(exact) == 1:
             return exact[0]
         candidates = exact or [
-            tid for tid, a in self._tabs.items() if any(n.startswith(q) for n in names(a))
+            tid
+            for tid, a in self._tabs.items()
+            if any(n.startswith(q) for n in names(a))
         ]
         if len(candidates) == 1:
             return candidates[0]
         if candidates:
             listed = "、".join(self._label(tid) for tid in candidates)
-            raise LookupError(f"「{query}」對到多個 agent：{listed}，請指定更完整的名稱")
+            raise LookupError(
+                f"「{query}」對到多個 agent：{listed}，請指定更完整的名稱"
+            )
         opened = "、".join(self._label(tid) for tid in self._tabs) or "（無）"
         raise LookupError(f"找不到已開啟的 agent：{query}。目前開啟：{opened}")
 

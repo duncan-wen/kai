@@ -1,4 +1,5 @@
 """File tree widgets: RightClickTree, TreeContextMenu, FileTree."""
+
 from __future__ import annotations
 
 import os
@@ -189,7 +190,12 @@ class TreeContextMenu(ModalScreen):
 
         if len(selected) >= 2 and self._path in selected:
             self._batch_paths = list(selected)
-            yield OptionList("複製檔名", "新增檔案", f"刪除選取 ({len(selected)} 項)", id="ctx-options")
+            yield OptionList(
+                "複製檔名",
+                "新增檔案",
+                f"刪除選取 ({len(selected)} 項)",
+                id="ctx-options",
+            )
         else:
             self._batch_paths = []
             yield OptionList("複製檔名", "新增檔案", "刪除", id="ctx-options")
@@ -517,7 +523,11 @@ class FileTree(Widget):
             tree = self.query_one(RightClickTree)
 
             def _walk(node: TreeNode) -> None:
-                if node is not tree.root and node.is_expanded and isinstance(node.data, Path):
+                if (
+                    node is not tree.root
+                    and node.is_expanded
+                    and isinstance(node.data, Path)
+                ):
                     expanded.add(node.data)
                 for child in node.children:
                     _walk(child)

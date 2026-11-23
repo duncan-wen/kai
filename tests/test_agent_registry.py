@@ -1,4 +1,5 @@
 """AgentRegistry：main agent 與 agent tab 的唯一 owner（tab id、作用中 Agent、查找、MCP 分發）。"""
+
 import pytest
 
 from core.agent import Agent
@@ -8,14 +9,28 @@ from core.agent_registry import AgentRegistry
 
 @pytest.fixture
 def make_agent(tmp_path):
-    def _make(name: str | None = None, nickname: str | None = None, mcp_servers: dict | None = None) -> Agent:
+    def _make(
+        name: str | None = None,
+        nickname: str | None = None,
+        mcp_servers: dict | None = None,
+    ) -> Agent:
         adir = tmp_path / (name or "main")
         adir.mkdir(exist_ok=True)
-        agent = Agent(model="qwen3.5:4b", history_file=adir / "history.json", agent_dir=adir if name else None)
+        agent = Agent(
+            model="qwen3.5:4b",
+            history_file=adir / "history.json",
+            agent_dir=adir if name else None,
+        )
         if name:
-            agent.apply_definition(AgentDefinition(
-                name=name, nickname=nickname, model="qwen3.5:4b", system_prompt="你是助手。", mcp_servers=mcp_servers,
-            ))
+            agent.apply_definition(
+                AgentDefinition(
+                    name=name,
+                    nickname=nickname,
+                    model="qwen3.5:4b",
+                    system_prompt="你是助手。",
+                    mcp_servers=mcp_servers,
+                )
+            )
         return agent
 
     return _make
@@ -95,10 +110,10 @@ def test_find_main_by_display_name(team):
 @pytest.mark.parametrize(
     "query, expected",
     [
-        ("writer", "writer"),       # 完全相同優先，即使 writer-zh 也以它開頭
-        ("小寫", "writer"),          # nickname
-        ("RITA", "reviewer"),       # 不分大小寫
-        ("rev", "reviewer"),        # 唯一前綴
+        ("writer", "writer"),  # 完全相同優先，即使 writer-zh 也以它開頭
+        ("小寫", "writer"),  # nickname
+        ("RITA", "reviewer"),  # 不分大小寫
+        ("rev", "reviewer"),  # 唯一前綴
         ("writer-", "writer-zh"),
     ],
 )
@@ -122,6 +137,7 @@ def test_find_unknown_name_fails(team):
 
 def fake_mcp():
     from types import SimpleNamespace
+
     return SimpleNamespace(tool_names={"read_file"}, server_summary={"fs": 1}, tools=[])
 
 
@@ -165,7 +181,9 @@ def test_reloaded_agent_that_opts_back_in_gets_mcp(registry, make_agent):
     mcp = fake_mcp()
     registry.set_mcp(mcp, "ctx")
 
-    loner.apply_definition(AgentDefinition(name="loner", model="qwen3.5:4b", system_prompt="你是助手。"))
+    loner.apply_definition(
+        AgentDefinition(name="loner", model="qwen3.5:4b", system_prompt="你是助手。")
+    )
     registry.attach_mcp(loner)
 
     assert loner.mcp_client is mcp

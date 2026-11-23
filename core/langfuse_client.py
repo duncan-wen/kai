@@ -12,6 +12,7 @@
     with generation(name="llm-call", model="...", input=...) as gen:
         gen.update(output=..., usage_details=...)
 """
+
 from __future__ import annotations
 
 import os
@@ -72,12 +73,14 @@ MASK = "***"
 
 # 常見憑證格式（工具輸出如 `cat .env`、`env` 可能整段帶出）
 _SECRET_PATTERNS = [
-    re.compile(r"\b(?:sk|pk)-lf-[A-Za-z0-9-]{8,}"),           # Langfuse
-    re.compile(r"\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}"),     # OpenAI / DeepSeek / Anthropic
-    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"),                   # Google
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),               # GitHub
-    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),             # Slack
-    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),    # Authorization header
+    re.compile(r"\b(?:sk|pk)-lf-[A-Za-z0-9-]{8,}"),  # Langfuse
+    re.compile(
+        r"\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{16,}"
+    ),  # OpenAI / DeepSeek / Anthropic
+    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"),  # Google
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),  # GitHub
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),  # Slack
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),  # Authorization header
 ]
 # 賦值形式：保留名稱、遮掉值。純數字值不遮（MAX_TOKENS=4096 之類的設定不是密鑰）。
 _ASSIGNMENTS = [
@@ -105,7 +108,8 @@ _LEARNED_MAX = 1000
 def _known_secret_values() -> list[str]:
     """已知密鑰原值：環境變數（≥8 字元）＋先前從賦值認出的值；長的先比對，避免部分取代。"""
     values = {
-        v for k, v in os.environ.items()
+        v
+        for k, v in os.environ.items()
         if _SENSITIVE_ENV.search(k) and isinstance(v, str) and len(v) >= 8
     }
     values |= _learned_secrets
@@ -213,7 +217,10 @@ def trace(
             trace_name=name,
         ):
             with langfuse.start_as_current_observation(
-                as_type="span", name=name, input=input, metadata=metadata,
+                as_type="span",
+                name=name,
+                input=input,
+                metadata=metadata,
             ) as span:
                 yield span
     finally:
@@ -249,8 +256,12 @@ def generation(
         yield None
         return
     with langfuse.start_as_current_observation(
-        as_type="generation", name=name, model=model, input=input,
-        model_parameters=model_parameters, metadata=metadata,
+        as_type="generation",
+        name=name,
+        model=model,
+        input=input,
+        model_parameters=model_parameters,
+        metadata=metadata,
     ) as gen:
         yield gen
 
@@ -263,7 +274,9 @@ def tool(*, name: str, input: Any = None) -> Iterator[Any]:
         yield None
         return
     with langfuse.start_as_current_observation(
-        as_type="tool", name=name, input=input,
+        as_type="tool",
+        name=name,
+        input=input,
     ) as t:
         yield t
 
@@ -281,7 +294,9 @@ def agent(*, name: str, input: Any = None) -> Iterator[Any]:
         yield None
         return
     with langfuse.start_as_current_observation(
-        as_type="agent", name=name, input=input,
+        as_type="agent",
+        name=name,
+        input=input,
     ) as a:
         yield a
 
@@ -343,7 +358,9 @@ def tool_call_dict(tc: Any, index: int = 0) -> dict:
         args = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
     tc_id = _get(tc, "id")
     if not tc_id:
-        digest = hashlib.sha1(f"{index}\x00{name}\x00{args}".encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha1(
+            f"{index}\x00{name}\x00{args}".encode("utf-8")
+        ).hexdigest()[:12]
         tc_id = f"call_{digest}"
     return {
         "id": str(tc_id),
@@ -406,7 +423,9 @@ def trim_messages(
             head.append({"role": "system", "content": SYSTEM_PLACEHOLDER_TEXT})
 
     body: list[dict] = []
-    pending_ids: list[str] = []  # Ollama 的 tool 結果沒有 tool_call_id，依序對應前一則的呼叫
+    pending_ids: list[
+        str
+    ] = []  # Ollama 的 tool 結果沒有 tool_call_id，依序對應前一則的呼叫
     for m in messages:
         if not isinstance(m, dict):
             continue
@@ -420,7 +439,9 @@ def trim_messages(
             body.append({"role": "assistant", "content": text, "tool_calls": calls})
             continue
         if role == "tool":
-            tc_id = m.get("tool_call_id") or (pending_ids.pop(0) if pending_ids else None)
+            tc_id = m.get("tool_call_id") or (
+                pending_ids.pop(0) if pending_ids else None
+            )
             tool_msg: dict = {"role": "tool", "content": text}
             if tc_id:
                 tool_msg["tool_call_id"] = tc_id

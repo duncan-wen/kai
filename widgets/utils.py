@@ -1,4 +1,5 @@
 """Shared constants and utility functions for the TUI."""
+
 from __future__ import annotations
 
 import re
@@ -10,41 +11,114 @@ from loguru import logger
 # LaTeX inline math → Unicode 對照表
 _LATEX_MAP: dict[str, str] = {
     # 箭頭
-    "rightarrow": "→", "leftarrow": "←", "to": "→",
-    "Rightarrow": "⇒", "Leftarrow": "⇐",
-    "leftrightarrow": "↔", "Leftrightarrow": "⇔",
-    "uparrow": "↑", "downarrow": "↓",
-    "nearrow": "↗", "searrow": "↘", "nwarrow": "↖", "swarrow": "↙",
-    "implies": "⟹", "iff": "⟺",
+    "rightarrow": "→",
+    "leftarrow": "←",
+    "to": "→",
+    "Rightarrow": "⇒",
+    "Leftarrow": "⇐",
+    "leftrightarrow": "↔",
+    "Leftrightarrow": "⇔",
+    "uparrow": "↑",
+    "downarrow": "↓",
+    "nearrow": "↗",
+    "searrow": "↘",
+    "nwarrow": "↖",
+    "swarrow": "↙",
+    "implies": "⟹",
+    "iff": "⟺",
     # 比較 / 運算
-    "leq": "≤", "geq": "≥", "neq": "≠", "approx": "≈",
-    "equiv": "≡", "sim": "∼", "simeq": "≃", "cong": "≅",
-    "ll": "≪", "gg": "≫", "propto": "∝",
-    "times": "×", "div": "÷", "pm": "±", "mp": "∓",
-    "cdot": "·", "circ": "∘", "oplus": "⊕", "otimes": "⊗",
+    "leq": "≤",
+    "geq": "≥",
+    "neq": "≠",
+    "approx": "≈",
+    "equiv": "≡",
+    "sim": "∼",
+    "simeq": "≃",
+    "cong": "≅",
+    "ll": "≪",
+    "gg": "≫",
+    "propto": "∝",
+    "times": "×",
+    "div": "÷",
+    "pm": "±",
+    "mp": "∓",
+    "cdot": "·",
+    "circ": "∘",
+    "oplus": "⊕",
+    "otimes": "⊗",
     # 集合 / 邏輯
-    "in": "∈", "notin": "∉", "ni": "∋",
-    "subset": "⊂", "subseteq": "⊆", "supset": "⊃", "supseteq": "⊇",
-    "cup": "∪", "cap": "∩", "setminus": "∖", "emptyset": "∅",
-    "forall": "∀", "exists": "∃", "nexists": "∄",
-    "neg": "¬", "land": "∧", "lor": "∨",
+    "in": "∈",
+    "notin": "∉",
+    "ni": "∋",
+    "subset": "⊂",
+    "subseteq": "⊆",
+    "supset": "⊃",
+    "supseteq": "⊇",
+    "cup": "∪",
+    "cap": "∩",
+    "setminus": "∖",
+    "emptyset": "∅",
+    "forall": "∀",
+    "exists": "∃",
+    "nexists": "∄",
+    "neg": "¬",
+    "land": "∧",
+    "lor": "∨",
     # 數學符號
-    "infty": "∞", "partial": "∂", "nabla": "∇",
-    "sum": "∑", "prod": "∏", "int": "∫", "oint": "∮",
-    "sqrt": "√", "ldots": "…", "cdots": "⋯", "vdots": "⋮", "ddots": "⋱",
-    "therefore": "∴", "because": "∵",
+    "infty": "∞",
+    "partial": "∂",
+    "nabla": "∇",
+    "sum": "∑",
+    "prod": "∏",
+    "int": "∫",
+    "oint": "∮",
+    "sqrt": "√",
+    "ldots": "…",
+    "cdots": "⋯",
+    "vdots": "⋮",
+    "ddots": "⋱",
+    "therefore": "∴",
+    "because": "∵",
     # 希臘小寫
-    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
-    "epsilon": "ε", "varepsilon": "ε", "zeta": "ζ", "eta": "η",
-    "theta": "θ", "vartheta": "ϑ", "iota": "ι", "kappa": "κ",
-    "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ",
-    "pi": "π", "varpi": "ϖ", "rho": "ρ", "sigma": "σ",
-    "tau": "τ", "upsilon": "υ", "phi": "φ", "varphi": "φ",
-    "chi": "χ", "psi": "ψ", "omega": "ω",
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "delta": "δ",
+    "epsilon": "ε",
+    "varepsilon": "ε",
+    "zeta": "ζ",
+    "eta": "η",
+    "theta": "θ",
+    "vartheta": "ϑ",
+    "iota": "ι",
+    "kappa": "κ",
+    "lambda": "λ",
+    "mu": "μ",
+    "nu": "ν",
+    "xi": "ξ",
+    "pi": "π",
+    "varpi": "ϖ",
+    "rho": "ρ",
+    "sigma": "σ",
+    "tau": "τ",
+    "upsilon": "υ",
+    "phi": "φ",
+    "varphi": "φ",
+    "chi": "χ",
+    "psi": "ψ",
+    "omega": "ω",
     # 希臘大寫
-    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ",
-    "Xi": "Ξ", "Pi": "Π", "Sigma": "Σ", "Upsilon": "Υ",
-    "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "Gamma": "Γ",
+    "Delta": "Δ",
+    "Theta": "Θ",
+    "Lambda": "Λ",
+    "Xi": "Ξ",
+    "Pi": "Π",
+    "Sigma": "Σ",
+    "Upsilon": "Υ",
+    "Phi": "Φ",
+    "Psi": "Ψ",
+    "Omega": "Ω",
 }
 
 # 比對 $...$ 但跳過 code fence / inline code
@@ -77,7 +151,9 @@ def _wrap_box_drawing(text: str) -> str:
             while i < len(lines):
                 cur = lines[i]
                 ls = sum(len(x) + 1 for x in lines[:i])
-                if not _in_code(ls) and (len(_BOX_DRAWING.findall(cur)) >= 2 or cur.strip() == ""):
+                if not _in_code(ls) and (
+                    len(_BOX_DRAWING.findall(cur)) >= 2 or cur.strip() == ""
+                ):
                     block.append(cur)
                     i += 1
                 else:
@@ -114,6 +190,7 @@ def _latex_to_unicode(text: str) -> str:
         return _LATEX_MAP.get(cmd, m.group(0))
 
     return _INLINE_MATH.sub(_replace, text)
+
 
 _IMAGE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".svg"}
@@ -258,9 +335,12 @@ def _line_height(text: str, cols: int = 100) -> int:
 def _open_url(url: str) -> None:
     """在瀏覽器開啟 URL（WSL → cmd.exe start，Linux → xdg-open，macOS → open）。"""
     import shutil
+
     try:
         if shutil.which("wslpath"):
-            subprocess.run(["cmd.exe", "/c", "start", "", url], check=False, capture_output=True)
+            subprocess.run(
+                ["cmd.exe", "/c", "start", "", url], check=False, capture_output=True
+            )
         elif shutil.which("xdg-open"):
             subprocess.run(["xdg-open", url], check=False, capture_output=True)
         elif shutil.which("open"):
@@ -273,7 +353,10 @@ def _mermaid_url(code: str) -> str:
     """Mermaid 原始碼 → mermaid.live 編輯器 URL。"""
     import base64
     import json
-    state = json.dumps({"code": code, "mermaid": '{"theme":"default"}'}, ensure_ascii=False)
+
+    state = json.dumps(
+        {"code": code, "mermaid": '{"theme":"default"}'}, ensure_ascii=False
+    )
     encoded = base64.b64encode(state.encode()).decode()
     return f"https://mermaid.live/edit#base64:{encoded}"
 

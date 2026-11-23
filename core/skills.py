@@ -9,6 +9,7 @@ system prompt 索引、側邊欄 ``🧩 Skills``、``/skills`` 指令、``use_sk
 
 設計與決策見 ``docs/skill-system.md``。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -29,7 +30,9 @@ class Skill:
     when_to_use: str
     path: Path  # skill 目錄（含 SKILL.md，可附 scripts/、references/）
     body: str  # frontmatter 之後的 Markdown 本體
-    scripts: list[str] = field(default_factory=list)  # scripts/ 下檔案（相對 skill 目錄）
+    scripts: list[str] = field(
+        default_factory=list
+    )  # scripts/ 下檔案（相對 skill 目錄）
 
 
 def local_skills_dir() -> Path:

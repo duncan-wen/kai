@@ -22,6 +22,7 @@ def _apply_env(g: dict) -> None:
     新增設定只需在 core/config_registry.py 加一筆 ConfigEntry。
     """
     from .config_registry import REGISTRY
+
     for entry in REGISTRY:
         raw = os.getenv(entry.env)
         if raw is None:
@@ -42,6 +43,7 @@ _apply_env(globals())
 def _normalize(model: str) -> str:
     """qwen3-vl:4b → qwen3_vl_4b（供 NICKNAME_ 查找用）"""
     import re
+
     return re.sub(r"[^a-zA-Z0-9]", "_", model)
 
 
@@ -67,6 +69,7 @@ def load_kai_config() -> dict:
     """讀取 ~/.kai/config.json（全域）+ cwd/.kai/config.json（專案），shallow merge。
     專案設定優先；兩者皆不存在時回傳 {}。
     """
+
     def _read(path: Path) -> dict:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
@@ -74,13 +77,14 @@ def load_kai_config() -> dict:
             return {}
 
     global_cfg = _read(Path.home() / ".kai" / "config.json")
-    local_cfg  = _read(Path(".kai") / "config.json")
+    local_cfg = _read(Path(".kai") / "config.json")
     return {**global_cfg, **local_cfg}
 
 
 def config_sources() -> dict[str, str]:
     """回傳每個 config key 的讀取來源：'local' / 'global' / '.env'。"""
     from .config_registry import REGISTRY
+
     g = globals()
 
     def _read(path: Path) -> dict:
@@ -89,7 +93,7 @@ def config_sources() -> dict[str, str]:
         except Exception:
             return {}
 
-    local  = _read(Path(".kai") / "config.json")
+    local = _read(Path(".kai") / "config.json")
     global_ = _read(Path.home() / ".kai" / "config.json")
 
     sources: dict[str, str] = {}
@@ -97,11 +101,13 @@ def config_sources() -> dict[str, str]:
         if entry.api_key:
             continue
         current = g[entry.env]
+
         def _matches(raw: object) -> bool:
             try:
                 return entry.type(raw) == current
             except (ValueError, TypeError):
                 return False
+
         if entry.key in local and _matches(local[entry.key]):
             sources[entry.key] = "local"
         elif entry.key in global_ and _matches(global_[entry.key]):
@@ -114,6 +120,7 @@ def config_sources() -> dict[str, str]:
 def current_kai_config() -> dict:
     """回傳目前所有生效的 config 傀（可寫入 config.json 的 key）。"""
     from .config_registry import REGISTRY
+
     g = globals()
     return {e.key: g[e.env] for e in REGISTRY if not e.api_key}
 
@@ -121,6 +128,7 @@ def current_kai_config() -> dict:
 def apply_kai_config(cfg: dict) -> None:
     """將 config dict 套用到 module globals。API key 類不支援（留在 .env）。"""
     from .config_registry import REGISTRY
+
     g = globals()
     key_map = {e.key: e for e in REGISTRY if not e.api_key}
     for key, val in cfg.items():
@@ -128,7 +136,11 @@ def apply_kai_config(cfg: dict) -> None:
             continue
         entry = key_map[key]
         if entry.type is bool:
-            g[entry.env] = bool(val) if isinstance(val, bool) else str(val).lower() in ("1", "true", "yes")
+            g[entry.env] = (
+                bool(val)
+                if isinstance(val, bool)
+                else str(val).lower() in ("1", "true", "yes")
+            )
         elif entry.type is int:
             g[entry.env] = int(val)
         elif entry.type is float:

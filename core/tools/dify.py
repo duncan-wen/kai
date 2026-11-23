@@ -48,7 +48,7 @@ async def fetch_dify_datasets(dataset_ids: list[str]) -> str:
         logger.error(f"fetch_dify_datasets 失敗：{e}")
         return f"（取得 KB 清單失敗：{e}）"
 
-    rows = ["| ID | 名稱 | 說明 |", "|-----|------|------|"] 
+    rows = ["| ID | 名稱 | 說明 |", "|-----|------|------|"]
     for did in dataset_ids:
         d = all_ds.get(did, {})
         name = d.get("name", "（找不到）")
@@ -72,7 +72,9 @@ async def _dify_retrieve_one(query: str, dataset_id: str) -> str:
             "reranking_model": {
                 "reranking_provider_name": _cfg.DIFY_RERANK_PROVIDER,
                 "reranking_model_name": _cfg.DIFY_RERANK_MODEL,
-            } if _cfg.DIFY_RERANK_MODEL else None,
+            }
+            if _cfg.DIFY_RERANK_MODEL
+            else None,
             "top_k": _cfg.DIFY_TOP_K,
             "score_threshold_enabled": False,
         },

@@ -1,4 +1,5 @@
 """MCPListScreen — ModalScreen 顯示已連線 MCP servers 與工具清單。"""
+
 from __future__ import annotations
 
 from rich.box import SIMPLE
@@ -62,12 +63,16 @@ class MCPListScreen(ModalScreen):
             )
             with VerticalScroll(id="mcp-scroll"):
                 for server, tools in self._tools_by_server.items():
-                    tbl = RichTable(box=SIMPLE, show_header=True, expand=True, padding=(0, 1))
+                    tbl = RichTable(
+                        box=SIMPLE, show_header=True, expand=True, padding=(0, 1)
+                    )
                     tbl.add_column("工具", style="cyan bold", no_wrap=True)
                     tbl.add_column("說明", style="dim")
                     for t in tools:
                         tbl.add_row(t["name"], t.get("description") or "—")
-                    with Collapsible(title=f"{server}  ({len(tools)} 工具)", collapsed=False):
+                    with Collapsible(
+                        title=f"{server}  ({len(tools)} 工具)", collapsed=False
+                    ):
                         yield Static(tbl)
             yield Button("關閉  [Esc / Q]", variant="default", id="mcp-close")
 

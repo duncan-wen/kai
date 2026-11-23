@@ -1,4 +1,5 @@
 """AppToolsMixin — 將 app-level 指令暴露為 AI tools，注入 main agent。"""
+
 from __future__ import annotations
 
 import os
@@ -34,11 +35,12 @@ from .app_tool_schemas import (
     TOGGLE_GREETING_TOOL as _TOGGLE_GREETING_TOOL,
 )
 
-class AppToolsMixin(_MixinBase):
 
+class AppToolsMixin(_MixinBase):
     def _inject_app_tools(self, agent: "Agent") -> None:
         """將 app-level tools 注入 agent。只對 main agent 呼叫一次（或切換模型後重注入）。"""
         from core.models import REGISTRY
+
         models_str = "、".join(REGISTRY.keys())
 
         create_agent_tool = {
@@ -52,13 +54,34 @@ class AppToolsMixin(_MixinBase):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name":          {"type": "string", "description": "agent 顯示名稱（中文可以）"},
-                        "nickname":      {"type": "string", "description": "簡短暱稱 2-4 字，省略則同 name"},
-                        "model":         {"type": "string", "description": f"模型名稱，可用：{models_str}"},
-                        "system_prompt": {"type": "string", "description": "完整 system prompt；請先呼叫 design_system_prompt 取得，**必須原封不動傳入，包含 {DIFY_DATASETS} 等佔位符，不得刪減任何段落**"},
-                        "description":   {"type": "string", "description": "一行說明這個 agent 的用途"},
-                        "greeting":      {"type": "string", "description": "首次對話時 AI 主動開場的 prompt，可省略"},
-                        "global_scope":  {"type": "boolean", "description": "**預設必須用 false**，只有用戶明確說「跨專案」或「全域」時才用 true。true = 存到 ~/.kai/agents/（跨專案）；false = 存到 cwd/agents/"},
+                        "name": {
+                            "type": "string",
+                            "description": "agent 顯示名稱（中文可以）",
+                        },
+                        "nickname": {
+                            "type": "string",
+                            "description": "簡短暱稱 2-4 字，省略則同 name",
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": f"模型名稱，可用：{models_str}",
+                        },
+                        "system_prompt": {
+                            "type": "string",
+                            "description": "完整 system prompt；請先呼叫 design_system_prompt 取得，**必須原封不動傳入，包含 {DIFY_DATASETS} 等佔位符，不得刪減任何段落**",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "一行說明這個 agent 的用途",
+                        },
+                        "greeting": {
+                            "type": "string",
+                            "description": "首次對話時 AI 主動開場的 prompt，可省略",
+                        },
+                        "global_scope": {
+                            "type": "boolean",
+                            "description": "**預設必須用 false**，只有用戶明確說「跨專案」或「全域」時才用 true。true = 存到 ~/.kai/agents/（跨專案）；false = 存到 cwd/agents/",
+                        },
                         "datasets": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -68,7 +91,7 @@ class AppToolsMixin(_MixinBase):
                             "type": "object",
                             "description": (
                                 "語音設定。用戶提到「需要語音」「語音朗讀」「TTS」「說話」時填入，否則省略。"
-                                "格式：{\"engine\": \"edge-tts\", \"voice\": \"zh-TW-HsiaoChenNeural\", \"player\": \"powershell\", \"speed\": 1.0}。"
+                                '格式：{"engine": "edge-tts", "voice": "zh-TW-HsiaoChenNeural", "player": "powershell", "speed": 1.0}。'
                                 "中文 voice：zh-TW-HsiaoChenNeural（女）/ zh-TW-YunJheNeural（男）；英文：en-US-AriaNeural。"
                             ),
                         },
@@ -86,7 +109,10 @@ class AppToolsMixin(_MixinBase):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "model": {"type": "string", "description": f"目標模型名稱，可用：{models_str}"},
+                        "model": {
+                            "type": "string",
+                            "description": f"目標模型名稱，可用：{models_str}",
+                        },
                     },
                     "required": ["model"],
                 },
@@ -129,28 +155,28 @@ class AppToolsMixin(_MixinBase):
             _SEND_TO_AGENT_TOOL,
         ]
         agent.extra_tools_map = {
-            "list_open_agents":      self._app_list_open_agents,
-            "list_agents":           self._app_list_agents,
-            "design_system_prompt":  self._app_design_system_prompt,
-            "create_agent":          self._app_create_agent,
-            "load_agent":       self._app_load_agent,
-            "close_agent":      self._app_close_agent,
-            "delete_agent":     self._app_delete_agent,
-            "reload_agent":     self._app_reload_agent,
-            "change_dir":       self._app_change_dir,
-            "switch_model":     self._app_switch_model,
-            "create_skill":     self._app_create_skill,
-            "remember":         self._app_remember,
-            "rename_session":   self._app_rename_session,
-            "reload_config":    self._app_reload_config,
-            "compact_history":  self._app_compact_history,
-            "list_mcp":         self._app_list_mcp,
-            "add_mcp":          self._app_add_mcp,
-            "remove_mcp":       self._app_remove_mcp,
-            "reload_mcp":       self._app_reload_mcp,
-            "set_tts":          self._app_set_tts,
-            "toggle_greeting":  self._app_toggle_greeting,
-            "send_to_agent":    self._app_send_to_agent,
+            "list_open_agents": self._app_list_open_agents,
+            "list_agents": self._app_list_agents,
+            "design_system_prompt": self._app_design_system_prompt,
+            "create_agent": self._app_create_agent,
+            "load_agent": self._app_load_agent,
+            "close_agent": self._app_close_agent,
+            "delete_agent": self._app_delete_agent,
+            "reload_agent": self._app_reload_agent,
+            "change_dir": self._app_change_dir,
+            "switch_model": self._app_switch_model,
+            "create_skill": self._app_create_skill,
+            "remember": self._app_remember,
+            "rename_session": self._app_rename_session,
+            "reload_config": self._app_reload_config,
+            "compact_history": self._app_compact_history,
+            "list_mcp": self._app_list_mcp,
+            "add_mcp": self._app_add_mcp,
+            "remove_mcp": self._app_remove_mcp,
+            "reload_mcp": self._app_reload_mcp,
+            "set_tts": self._app_set_tts,
+            "toggle_greeting": self._app_toggle_greeting,
+            "send_to_agent": self._app_send_to_agent,
         }
 
     # ── callbacks ─────────────────────────────────────────────────────────────
@@ -171,6 +197,7 @@ class AppToolsMixin(_MixinBase):
         import json
         from core.agent_factory import call_design_model
         import core.config as _cfg
+
         design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
         self.notify(f"設計 system prompt 中…（{design_model}）", timeout=30)
         system_prompt, greeting, extras = await call_design_model(name, description)
@@ -179,6 +206,7 @@ class AppToolsMixin(_MixinBase):
 
     async def _app_list_agents(self) -> str:
         from core.agent_factory import list_agents
+
         agents = list_agents()
         if not agents:
             return "目前沒有任何 agent，可以用 create_agent 建立。"
@@ -204,6 +232,7 @@ class AppToolsMixin(_MixinBase):
     ) -> str:
         from core.agent_factory import save_agent, validate_agent
         from widgets.tree import FileTree
+
         data: dict = {
             "name": name,
             "nickname": nickname or name,
@@ -226,12 +255,17 @@ class AppToolsMixin(_MixinBase):
             self.query_one("#file-tree", FileTree).refresh_tree()
         except Exception:
             pass
-        scope_label = f"~/.kai/agents/{adir.name}" if global_scope else f"agents/{adir.name}"
-        return f"✅ 已建立 agent：{name}（{scope_label}）。可告訴我「載入 {name}」來開啟。"
+        scope_label = (
+            f"~/.kai/agents/{adir.name}" if global_scope else f"agents/{adir.name}"
+        )
+        return (
+            f"✅ 已建立 agent：{name}（{scope_label}）。可告訴我「載入 {name}」來開啟。"
+        )
 
     async def _app_load_agent(self, name: str) -> str:
         from core.agent_factory import find_agent
         from core.agent_registry import AgentRegistry
+
         # 若已開啟，直接切換 tab（有歧義時交給 find_agent 從磁碟找）
         try:
             tab_id = self.agents.find(name)
@@ -251,6 +285,7 @@ class AppToolsMixin(_MixinBase):
 
     async def _app_close_agent(self, name: str = "") -> str:
         from core.agent_registry import AgentRegistry
+
         tabs = self.agents.tabs()
         if not name:
             if not tabs:
@@ -274,6 +309,7 @@ class AppToolsMixin(_MixinBase):
     async def _app_delete_agent(self, name: str) -> str:
         from core.agent_factory import find_all_agents, delete_agent
         from widgets.tree import FileTree
+
         matches = find_all_agents(name)
         if not matches:
             return f"找不到 agent：{name}"
@@ -321,10 +357,14 @@ class AppToolsMixin(_MixinBase):
         global_scope: bool = False,
     ) -> str:
         from core.skills import create_skill
+
         try:
             skill = create_skill(
-                name, description, body,
-                when_to_use=when_to_use, global_scope=global_scope,
+                name,
+                description,
+                body,
+                when_to_use=when_to_use,
+                global_scope=global_scope,
             )
         except Exception as e:
             return f"建立 skill 失敗：{e}"
@@ -374,9 +414,12 @@ class AppToolsMixin(_MixinBase):
             lines.append(f"- {server}（{len(tools)} 個工具）：{names}")
         return "\n".join(lines)
 
-    async def _app_add_mcp(self, name: str, command: str = "", args: list | None = None, url: str = "") -> str:
+    async def _app_add_mcp(
+        self, name: str, command: str = "", args: list | None = None, url: str = ""
+    ) -> str:
         import json
         from core.mcp_client import GLOBAL_MCP_FILE
+
         if not command and not url:
             return "需要提供 command 或 url"
         data: dict = {}
@@ -385,15 +428,22 @@ class AppToolsMixin(_MixinBase):
                 data = json.loads(GLOBAL_MCP_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
-        entry: dict = {"type": "http", "url": url} if url else {"command": command, "args": args or []}
+        entry: dict = (
+            {"type": "http", "url": url}
+            if url
+            else {"command": command, "args": args or []}
+        )
         data.setdefault("mcpServers", {})[name] = entry
         GLOBAL_MCP_FILE.parent.mkdir(parents=True, exist_ok=True)
-        GLOBAL_MCP_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        GLOBAL_MCP_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return f"✅ 已新增 MCP server：{name}。呼叫 reload_mcp 生效。"
 
     async def _app_remove_mcp(self, name: str) -> str:
         import json
         from core.mcp_client import GLOBAL_MCP_FILE
+
         if not GLOBAL_MCP_FILE.exists():
             return "~/.kai/mcp_servers.json 不存在"
         try:
@@ -405,7 +455,9 @@ class AppToolsMixin(_MixinBase):
             available = "、".join(servers.keys()) or "（空）"
             return f"找不到 server：{name}。目前有：{available}"
         del servers[name]
-        GLOBAL_MCP_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        GLOBAL_MCP_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return f"✅ 已移除 MCP server：{name}。呼叫 reload_mcp 生效。"
 
     async def _app_reload_mcp(self) -> str:
@@ -427,7 +479,11 @@ class AppToolsMixin(_MixinBase):
         async def _load(name: str) -> str:
             return await _self._app_load_agent(name)
 
-        agent.extra_tools = [_SEND_TO_AGENT_TOOL, _LOAD_AGENT_TOOL, _LIST_OPEN_AGENTS_TOOL]
+        agent.extra_tools = [
+            _SEND_TO_AGENT_TOOL,
+            _LOAD_AGENT_TOOL,
+            _LIST_OPEN_AGENTS_TOOL,
+        ]
         agent.extra_tools_map = {
             "send_to_agent": _send,
             "load_agent": _load,
@@ -439,9 +495,12 @@ class AppToolsMixin(_MixinBase):
             "若不確定 agent 名稱，先用 list_open_agents 查詢。"
         )
 
-    async def _app_send_to_agent(self, name: str, message: str, caller: "Agent | None" = None) -> str:
+    async def _app_send_to_agent(
+        self, name: str, message: str, caller: "Agent | None" = None
+    ) -> str:
         from loguru import logger
         from app import AgentMessage
+
         sender_name = caller.display_name if caller else self.agents.main.display_name
         try:
             tab_id = self.agents.find(name)
@@ -451,7 +510,9 @@ class AppToolsMixin(_MixinBase):
         target = self.agents.get(tab_id)
         logger.info(f"[inbox] send: {sender_name} → {target.display_name}")
         # 直接傳 tab id，dispatch 不必再查一次名稱
-        self.post_message(AgentMessage(sender=sender_name, target=tab_id, content=message))
+        self.post_message(
+            AgentMessage(sender=sender_name, target=tab_id, content=message)
+        )
         return f"✅ 訊息已傳送給 {target.display_name}"
 
     async def _app_set_tts(self, engine: str) -> str:

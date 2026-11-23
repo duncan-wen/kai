@@ -1,4 +1,5 @@
 """SkillsListScreen — ModalScreen 列出所有可用 skill（鏡像 MCPListScreen）。"""
+
 from __future__ import annotations
 
 from rich.box import SIMPLE
@@ -53,7 +54,9 @@ class SkillsListScreen(ModalScreen):
                 id="skills-title",
             )
             with VerticalScroll(id="skills-scroll"):
-                tbl = RichTable(box=SIMPLE, show_header=True, expand=True, padding=(0, 1))
+                tbl = RichTable(
+                    box=SIMPLE, show_header=True, expand=True, padding=(0, 1)
+                )
                 tbl.add_column("名稱", style="cyan bold", no_wrap=True)
                 tbl.add_column("說明", style="dim")
                 tbl.add_column("觸發時機", style="dim")

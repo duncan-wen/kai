@@ -3,6 +3,7 @@
 這兩個工具讓模型能在對話中動態載入 skill 的完整說明（SKILL.md 本體），
 資料來源統一讀 ``core.skills`` 掃描器（單一真相來源），不另起爐灶。
 """
+
 from __future__ import annotations
 
 from ..skills import Skill, discover_skills, load_skill

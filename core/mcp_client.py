@@ -16,7 +16,7 @@ from pathlib import Path
 from .config import BUNDLED_MCP_FILE, MCP_TOOL_TIMEOUT
 
 GLOBAL_MCP_FILE = Path.home() / ".kai" / "mcp_servers.json"
-LOCAL_MCP_FILE  = Path(".kai") / "mcp_servers.json"   # cwd-relative，每次呼叫時才 resolve
+LOCAL_MCP_FILE = Path(".kai") / "mcp_servers.json"  # cwd-relative，每次呼叫時才 resolve
 
 
 class MCPClient:
@@ -47,10 +47,12 @@ class MCPClient:
         for tool in self._tool_schemas:
             fn = tool["function"]
             server = self._tool_to_server.get(fn["name"], "unknown")
-            result.setdefault(server, []).append({
-                "name": fn["name"],
-                "description": fn.get("description", ""),
-            })
+            result.setdefault(server, []).append(
+                {
+                    "name": fn["name"],
+                    "description": fn.get("description", ""),
+                }
+            )
         return result
 
     @property
@@ -71,10 +73,17 @@ class MCPClient:
                 if transport_type == "http":
                     url = cfg["url"]
                     raw_headers = cfg.get("headers", {})
+
                     def _expand(v: str) -> str:
                         import re
-                        v = re.sub(r"\$\{env:([^}]+)\}", lambda m: os.getenv(m.group(1), m.group(0)), v)
+
+                        v = re.sub(
+                            r"\$\{env:([^}]+)\}",
+                            lambda m: os.getenv(m.group(1), m.group(0)),
+                            v,
+                        )
                         return os.path.expandvars(v)
+
                     headers = {k: _expand(v) for k, v in raw_headers.items()}
                     http_client = httpx.AsyncClient(headers=headers)
                     await self._stack.enter_async_context(http_client)
@@ -101,21 +110,25 @@ class MCPClient:
                 tools_result = await session.list_tools()
                 for tool in tools_result.tools:
                     self._tool_to_server[tool.name] = server_name
-                    self._tool_schemas.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description or "",
-                            "parameters": tool.inputSchema,
-                        },
-                    })
+                    self._tool_schemas.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description or "",
+                                "parameters": tool.inputSchema,
+                            },
+                        }
+                    )
                 logger.info(
                     f"MCP [{server_name}] 已連線，{len(tools_result.tools)} 個工具"
                 )
             except BaseException as e:
                 causes = e.exceptions if isinstance(e, BaseExceptionGroup) else [e]
                 for cause in causes:
-                    logger.warning(f"MCP [{server_name}] 連線失敗：{type(cause).__name__}: {cause}")
+                    logger.warning(
+                        f"MCP [{server_name}] 連線失敗：{type(cause).__name__}: {cause}"
+                    )
 
     async def stop(self):
         await self._stack.aclose()
@@ -128,13 +141,17 @@ class MCPClient:
         """
         import signal
         import subprocess as sp
+
         my_pid = os.getpid()
         try:
-            sp.run(["pkill", "-TERM", "-P", str(my_pid)], capture_output=True, timeout=2)
+            sp.run(
+                ["pkill", "-TERM", "-P", str(my_pid)], capture_output=True, timeout=2
+            )
         except Exception:
             # pkill not available — fall back to /proc scan (Linux only)
             try:
                 from pathlib import Path
+
                 for entry in Path("/proc").iterdir():
                     if not entry.name.isdigit():
                         continue
@@ -143,7 +160,13 @@ class MCPClient:
                         ppid = int(stat.split(")", 1)[1].split()[1])
                         if ppid == my_pid:
                             os.kill(int(entry.name), signal.SIGTERM)
-                    except (ValueError, IndexError, PermissionError, FileNotFoundError, ProcessLookupError):
+                    except (
+                        ValueError,
+                        IndexError,
+                        PermissionError,
+                        FileNotFoundError,
+                        ProcessLookupError,
+                    ):
                         pass
             except Exception as e:
                 logger.warning(f"force_kill 失敗：{e}")
@@ -162,6 +185,7 @@ class MCPClient:
         output = "\n".join(parts) or "[no output]"
         if result.isError:
             import json as _json
+
             args_preview = _json.dumps(arguments, ensure_ascii=False)[:300]
             logger.warning(f"MCP error [{tool_name}](args={args_preview}): {output}")
             return f"[MCP Error] {output}"
@@ -177,6 +201,7 @@ def _ensure_global_mcp() -> None:
     GLOBAL_MCP_FILE.parent.mkdir(parents=True, exist_ok=True)
     if BUNDLED_MCP_FILE.exists():
         import shutil
+
         shutil.copy(BUNDLED_MCP_FILE, GLOBAL_MCP_FILE)
         logger.info(f"初始化全域 MCP 設定：{GLOBAL_MCP_FILE}")
 
@@ -197,5 +222,5 @@ def load_mcp_servers() -> dict:
     """
     _ensure_global_mcp()
     global_srv = _read_mcp_file(GLOBAL_MCP_FILE)
-    local_srv  = _read_mcp_file(Path(".kai") / "mcp_servers.json")
+    local_srv = _read_mcp_file(Path(".kai") / "mcp_servers.json")
     return {**global_srv, **local_srv}

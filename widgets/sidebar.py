@@ -1,4 +1,5 @@
 """Sidebar and ResizeHandle widgets."""
+
 from __future__ import annotations
 
 import os
@@ -20,8 +21,12 @@ class ResizeHandle(Widget):
     """
 
     def __init__(
-        self, target_id: str, min_w: int = 10, max_w: int = 80,
-        right_anchor: bool = False, **kwargs
+        self,
+        target_id: str,
+        min_w: int = 10,
+        max_w: int = 80,
+        right_anchor: bool = False,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._target_id = target_id
@@ -50,7 +55,9 @@ class ResizeHandle(Widget):
             return
         target = self.app.query_one(f"#{self._target_id}")
         if self._right_anchor:
-            new_w = max(self._min_w, min(self._max_w, target.region.right - event.screen_x))
+            new_w = max(
+                self._min_w, min(self._max_w, target.region.right - event.screen_x)
+            )
         else:
             new_w = max(self._min_w, min(self._max_w, event.screen_x - target.region.x))
         target.styles.width = new_w
@@ -60,7 +67,9 @@ class Sidebar(Widget):
     """工作目錄、模型、Git 狀態側邊欄。"""
 
     def compose(self) -> ComposeResult:
-        yield Static("📂 工作目錄", id="sb-cwd-btn", classes="sidebar-title-btn", markup=False)
+        yield Static(
+            "📂 工作目錄", id="sb-cwd-btn", classes="sidebar-title-btn", markup=False
+        )
         yield Static(os.getcwd(), classes="sidebar-content", id="sb-cwd", markup=False)
         yield Static("🤖 模型", classes="sidebar-title", markup=True)
         yield Static(MODEL, classes="sidebar-content", id="sb-model", markup=False)
@@ -87,12 +96,14 @@ class Sidebar(Widget):
     @on(events.Click, "#sb-cwd-btn")
     async def _on_cwd_clicked(self, event: events.Click) -> None:
         event.stop()
+
         async def _on_dir_selected(path) -> None:
             if path:
                 try:
                     await self.app._do_cd(str(path))
                 except Exception as e:
                     self.app.notify(f"切換失敗：{e}", severity="error")
+
         self.app.push_screen(
             SelectDirectory(os.getcwd(), title="切換工作目錄"),
             callback=_on_dir_selected,

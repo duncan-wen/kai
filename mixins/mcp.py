@@ -1,4 +1,5 @@
 """MCPMixin — /mcp-list, /mcp-reload, /mcp-add, /mcp-del 指令邏輯。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +15,7 @@ else:
 class MCPMixin(_MixinBase):
     async def _do_mcp_list(self) -> None:
         from widgets.mcp_list import MCPListScreen
+
         mcp = self.agent.mcp_client
         if not mcp or not mcp.tool_names:
             self.notify("目前沒有連線中的 MCP server", severity="warning")
@@ -35,12 +37,19 @@ class MCPMixin(_MixinBase):
 
     async def _do_mcp_add(self, arg: str) -> None:
         from core.mcp_client import GLOBAL_MCP_FILE
+
         if not arg:
-            self.notify("用法：/mcp-add <name> <command> [args...]  或  /mcp-add <name> --url <url>", severity="warning")
+            self.notify(
+                "用法：/mcp-add <name> <command> [args...]  或  /mcp-add <name> --url <url>",
+                severity="warning",
+            )
             return
         parts = arg.split()
         if len(parts) < 2:
-            self.notify("用法：/mcp-add <name> <command> [args...]  或  /mcp-add <name> --url <url>", severity="warning")
+            self.notify(
+                "用法：/mcp-add <name> <command> [args...]  或  /mcp-add <name> --url <url>",
+                severity="warning",
+            )
             return
         name, *rest = parts
         data: dict = {}
@@ -59,11 +68,17 @@ class MCPMixin(_MixinBase):
             entry = {"command": command, "args": extra_args}
         data.setdefault("mcpServers", {})[name] = entry
         GLOBAL_MCP_FILE.parent.mkdir(parents=True, exist_ok=True)
-        GLOBAL_MCP_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.notify(f"✅ 已新增 {name} 到 ~/.kai/mcp_servers.json，執行 /mcp-reload 生效", severity="information")
+        GLOBAL_MCP_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.notify(
+            f"✅ 已新增 {name} 到 ~/.kai/mcp_servers.json，執行 /mcp-reload 生效",
+            severity="information",
+        )
 
     async def _do_mcp_del(self, arg: str) -> None:
         from core.mcp_client import GLOBAL_MCP_FILE
+
         if not arg:
             self.notify("用法：/mcp-del <name>", severity="warning")
             return
@@ -78,8 +93,16 @@ class MCPMixin(_MixinBase):
             return
         servers = data.get("mcpServers", {})
         if name not in servers:
-            self.notify(f"找不到 server：{name}（只能刪除 ~/.kai/mcp_servers.json 內的 server）", severity="error")
+            self.notify(
+                f"找不到 server：{name}（只能刪除 ~/.kai/mcp_servers.json 內的 server）",
+                severity="error",
+            )
             return
         del servers[name]
-        GLOBAL_MCP_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.notify(f"✅ 已從 ~/.kai/mcp_servers.json 移除 {name}，執行 /mcp-reload 生效", severity="information")
+        GLOBAL_MCP_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.notify(
+            f"✅ 已從 ~/.kai/mcp_servers.json 移除 {name}，執行 /mcp-reload 生效",
+            severity="information",
+        )

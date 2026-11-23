@@ -3,6 +3,7 @@
 測試一律停用 Langfuse 上報：避免單元測試的假資料（如假對話、假回覆）
 被送到真實的觀測專案，污染 production 的 trace 統計。
 """
+
 import pytest
 
 from core import langfuse_client as _lf

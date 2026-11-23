@@ -33,7 +33,9 @@ def _mask_args(raw) -> dict:
         return raw
     masked = {}
     for k, v in raw.items():
-        if any(s in str(k).lower() for s in ("key", "secret", "token", "password", "api")):
+        if any(
+            s in str(k).lower() for s in ("key", "secret", "token", "password", "api")
+        ):
             masked[k] = "***"
         else:
             masked[k] = v
@@ -72,7 +74,9 @@ async def run_tool(tc, tools_map: dict, mcp_client=None) -> ToolResult:
     if fn_name in SUBAGENT_DISPATCH_TOOLS:
         from ..langfuse_client import agent
 
-        subagent = str(raw.get("name", "unknown")) if isinstance(raw, dict) else "unknown"
+        subagent = (
+            str(raw.get("name", "unknown")) if isinstance(raw, dict) else "unknown"
+        )
         with agent(name=f"agent:{subagent}", input={"args": _mask_args(raw)}) as a:
             tr = await _dispatch(fn_name, raw, tools_map, mcp_client)
             _record_result(a, tr)

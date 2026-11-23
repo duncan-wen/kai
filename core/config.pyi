@@ -1,4 +1,5 @@
 """Type stubs for core.config — auto-mirrors config_registry.REGISTRY."""
+
 from pathlib import Path
 
 # 不可設定的計算屬性

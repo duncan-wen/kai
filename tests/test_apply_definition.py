@@ -1,4 +1,5 @@
 """Agent definition 解析，以及把 definition 套用到 Agent 上（開啟、reload、換模型）。"""
+
 import pytest
 
 from core.agent_factory import AgentDefinition
@@ -14,7 +15,10 @@ def defn(**overrides) -> AgentDefinition:
     "raw, expected",
     [
         (True, {"voice": "en-US-AriaNeural"}),
-        ({"engine": "kokoro", "voice": "af_sky"}, {"engine": "kokoro", "voice": "af_sky"}),
+        (
+            {"engine": "kokoro", "voice": "af_sky"},
+            {"engine": "kokoro", "voice": "af_sky"},
+        ),
         (False, None),
         ({}, None),
         (None, None),
@@ -29,7 +33,9 @@ def make_agent(tmp_path):
     from core.agent import Agent
 
     def _make(model: str = "qwen3.5:4b") -> Agent:
-        return Agent(model=model, history_file=tmp_path / "history.json", agent_dir=tmp_path)
+        return Agent(
+            model=model, history_file=tmp_path / "history.json", agent_dir=tmp_path
+        )
 
     return _make
 
@@ -64,7 +70,9 @@ def test_reapplying_definition_resets_omitted_fields_to_defaults(make_agent):
     from core.config import HISTORY_KEEP
 
     agent = make_agent()
-    agent.apply_definition(defn(nickname="小寫", history_keep=3, datasets=["kb-1"], tts=True))
+    agent.apply_definition(
+        defn(nickname="小寫", history_keep=3, datasets=["kb-1"], tts=True)
+    )
     agent.mcp_client = object()  # type: ignore[assignment]
 
     agent.apply_definition(defn(mcp_servers={}))
@@ -79,7 +87,9 @@ def test_reapplying_definition_resets_omitted_fields_to_defaults(make_agent):
 
 def test_switch_model_keeps_everything_but_the_model(make_agent):
     agent = make_agent("qwen3.5:4b")
-    agent.apply_definition(defn(nickname="小寫", history_keep=3, datasets=["kb-1"], tts=True))
+    agent.apply_definition(
+        defn(nickname="小寫", history_keep=3, datasets=["kb-1"], tts=True)
+    )
     agent.history.append({"role": "user", "content": "寫一首詩"})
     agent.extra_tools = [{"type": "function", "function": {"name": "send_to_agent"}}]
     agent.tools_map["open_agent"] = lambda q: q
@@ -115,7 +125,9 @@ def test_apply_definition_switches_to_the_definition_model(make_agent):
     assert "model → gemma4:e4b" in changes
 
 
-def test_apply_definition_with_unknown_model_keeps_current_model_and_applies_the_rest(make_agent):
+def test_apply_definition_with_unknown_model_keeps_current_model_and_applies_the_rest(
+    make_agent,
+):
     agent = make_agent("qwen3.5:4b")
 
     changes = agent.apply_definition(defn(model="no-such-model", nickname="小寫"))
@@ -138,7 +150,9 @@ def test_reset_history_follows_disk_when_history_file_was_deleted(make_agent, tm
     assert "你是寫手" in system_text(agent)
 
 
-def test_switch_model_during_a_turn_takes_effect_after_the_turn(make_agent, monkeypatch):
+def test_switch_model_during_a_turn_takes_effect_after_the_turn(
+    make_agent, monkeypatch
+):
     """AI 在自己的 turn 中途呼叫 switch_model：這個 turn 要用原模型跑完，下一個 turn 才換。"""
     import asyncio
     from types import SimpleNamespace
@@ -160,9 +174,13 @@ def test_switch_model_during_a_turn_takes_effect_after_the_turn(make_agent, monk
         # 假的模型串流（網路邊界）：第一輪要求換模型，第二輪回覆文字
         models_streamed.append(ag.profile.name)
         if len(models_streamed) == 1:
-            tool_calls.append(SimpleNamespace(
-                function=SimpleNamespace(name="switch_model", arguments={"model": "gemma4:e4b"})
-            ))
+            tool_calls.append(
+                SimpleNamespace(
+                    function=SimpleNamespace(
+                        name="switch_model", arguments={"model": "gemma4:e4b"}
+                    )
+                )
+            )
         else:
             reply_parts.append("換好了")
 

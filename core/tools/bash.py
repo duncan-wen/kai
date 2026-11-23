@@ -31,9 +31,7 @@ CLEAN_PATTERN = re.compile(
     r"|<\/?(?:think|thinking|scratchpad|internal)[^>]*>"
 )
 
-_SUDO_NONINTERACTIVE = (
-    r'sudo(){ command sudo -n "$@"; }; export -f sudo 2>/dev/null; '
-)
+_SUDO_NONINTERACTIVE = r'sudo(){ command sudo -n "$@"; }; export -f sudo 2>/dev/null; '
 
 
 def clean_thinking(text: str) -> str:
@@ -54,7 +52,9 @@ async def bash_exec(command: str, timeout: int = 0) -> ToolResult:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-c", _SUDO_NONINTERACTIVE + command,
+            "/bin/bash",
+            "-c",
+            _SUDO_NONINTERACTIVE + command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,

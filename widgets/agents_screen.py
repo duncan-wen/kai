@@ -1,4 +1,5 @@
 """AgentsScreen — agent 清單選擇器 ModalScreen（DataTable）。"""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -134,7 +135,9 @@ class DeleteAgentsScreen(ModalScreen[list[str]]):
 
     def on_mount(self) -> None:
         dt = self.query_one("#delete-agents-table", DataTable)
-        (self._col_check, *_) = dt.add_columns("", "來源", "名稱", "暱稱", "模型", "說明")
+        (self._col_check, *_) = dt.add_columns(
+            "", "來源", "名稱", "暱稱", "模型", "說明"
+        )
         for a in self._agents:
             key = f"{a.get('scope', 'local')}:{a['dir']}"
             self._keys.append(key)
@@ -156,7 +159,12 @@ class DeleteAgentsScreen(ModalScreen[list[str]]):
             self._selected.discard(key)
         else:
             self._selected.add(key)
-        dt.update_cell(key, self._col_check, _CHECKED if key in self._selected else _UNCHECKED, update_width=False)
+        dt.update_cell(
+            key,
+            self._col_check,
+            _CHECKED if key in self._selected else _UNCHECKED,
+            update_width=False,
+        )
         self._update_title()
 
     def _update_title(self) -> None:
@@ -231,7 +239,9 @@ class AgentsScreen(ModalScreen[str | None]):
         with Vertical(id="agents-dialog"):
             yield Label("🤖 Agent 清單", id="agents-title")
             yield DataTable(cursor_type="row", id="agents-table")
-            yield Label("[dim]↑↓ 選擇  Enter / 點擊 載入  Esc 關閉[/dim]", id="agents-hint")
+            yield Label(
+                "[dim]↑↓ 選擇  Enter / 點擊 載入  Esc 關閉[/dim]", id="agents-hint"
+            )
 
     def on_mount(self) -> None:
         dt = self.query_one("#agents-table", DataTable)

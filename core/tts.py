@@ -1,4 +1,5 @@
 """TTS 模組 — edge-tts（雲端）或 kokoro-onnx（本地）生成音訊。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,9 @@ def get_tts_loop() -> asyncio.AbstractEventLoop:
     with _tts_loop_lock:
         if _tts_loop is None or _tts_loop.is_closed():
             loop = asyncio.new_event_loop()
-            t = threading.Thread(target=loop.run_forever, daemon=True, name="tts-worker")
+            t = threading.Thread(
+                target=loop.run_forever, daemon=True, name="tts-worker"
+            )
             t.start()
             _tts_loop = loop
     return _tts_loop
@@ -65,8 +68,18 @@ def _player_cmd(player: str, path: str) -> list[str] | None:
         case "mpv":
             return ["mpv", "--no-terminal", "--really-quiet", path]
         case "ffplay":
-            return ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-                    "-analyzeduration", "0", "-probesize", "32", path]
+            return [
+                "ffplay",
+                "-nodisp",
+                "-autoexit",
+                "-loglevel",
+                "quiet",
+                "-analyzeduration",
+                "0",
+                "-probesize",
+                "32",
+                path,
+            ]
         case "mplayer":
             return ["mplayer", "-really-quiet", path]
         case "mpg123":
@@ -96,14 +109,18 @@ def _play_file_sync(path: str, player: str = "auto") -> None:
         try:
             result = subprocess.run(
                 ["wslpath", "-w", path],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             win_path = result.stdout.strip()
         except Exception:
             logger.warning("tts: wslpath 轉換失敗，無法播放")
             return
         if not win_path:
-            logger.warning("tts: wslpath 回傳空路徑（returncode=%d），無法播放", result.returncode)
+            logger.warning(
+                "tts: wslpath 回傳空路徑（returncode=%d），無法播放", result.returncode
+            )
             return
         if path.endswith(".wav"):
             win_path_esc = win_path.replace("'", "''")
@@ -137,7 +154,9 @@ def _play_file_sync(path: str, player: str = "auto") -> None:
         global _current_proc
         logger.info(f"tts play start: {Path(path).name}  player={player_label}")
         _t0 = __import__("time").perf_counter()
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         with _proc_lock:
             _current_proc = proc
         try:
@@ -146,7 +165,9 @@ def _play_file_sync(path: str, player: str = "auto") -> None:
             with _proc_lock:
                 if _current_proc is proc:
                     _current_proc = None
-        logger.info(f"tts play end: {Path(path).name}  elapsed={__import__('time').perf_counter() - _t0:.2f}s")
+        logger.info(
+            f"tts play end: {Path(path).name}  elapsed={__import__('time').perf_counter() - _t0:.2f}s"
+        )
     except Exception as e:
         logger.warning(f"tts 播放失敗：{e}")
 
@@ -157,7 +178,9 @@ async def _play_async(path: str, player: str) -> None:
     排隊的 TTS 進不去，直到音訊裝置釋放（如關機）才恢復。
     """
     try:
-        await asyncio.get_event_loop().run_in_executor(None, _play_file_sync, path, player)
+        await asyncio.get_event_loop().run_in_executor(
+            None, _play_file_sync, path, player
+        )
     except asyncio.CancelledError:
         cancel_current()  # 確保 subprocess 被殺掉
         raise
@@ -208,7 +231,9 @@ async def _speak_melotts(
     import string
     import urllib.request
 
-    session = "kai_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    session = "kai_" + "".join(
+        random.choices(string.ascii_lowercase + string.digits, k=8)
+    )
     uri = f"ws://{host}:{port}/queue/join"
 
     try:
@@ -219,11 +244,15 @@ async def _speak_melotts(
                 if m == "send_hash":
                     await ws.send(json.dumps({"session_hash": session, "fn_index": 1}))
                 elif m == "send_data":
-                    await ws.send(json.dumps({
-                        "data": [voice, text, speed, lang],
-                        "fn_index": 1,
-                        "session_hash": session,
-                    }))
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "data": [voice, text, speed, lang],
+                                "fn_index": 1,
+                                "session_hash": session,
+                            }
+                        )
+                    )
                 elif m == "process_completed":
                     out = msg.get("output", {}).get("data", [None])[0]
                     if not out:
@@ -250,14 +279,17 @@ async def _speak_melotts(
         logger.warning(f"tts melotts 連線失敗：{e}")
 
 
-_KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+_KOKORO_BASE = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+)
 _KOKORO_CACHE = Path.home() / ".cache" / "kokoro-onnx"
-_KOKORO_MODEL_FILE = "kokoro-v1.0.int8.onnx"   # int8 CPU-friendly (~80MB)
+_KOKORO_MODEL_FILE = "kokoro-v1.0.int8.onnx"  # int8 CPU-friendly (~80MB)
 _KOKORO_VOICES_FILE = "voices-v1.0.bin"
 
 
 def _download_kokoro_file(filename: str) -> Path:
     import urllib.request
+
     dest = _KOKORO_CACHE / filename
     if dest.exists():
         return dest
@@ -325,7 +357,9 @@ def _english_only(text: str) -> str:
 def _chunk_text(text: str, max_chars: int = _KOKORO_CHUNK_CHARS) -> list[str]:
     """依句子切段，每段不超過 max_chars；過長的單句再依空白切。"""
     sentences = [
-        s.strip() for s in re.split(r"(?<=[.!?;:])\s+|(?<=[。！？；])|\n+", text) if s.strip()
+        s.strip()
+        for s in re.split(r"(?<=[.!?;:])\s+|(?<=[。！？；])|\n+", text)
+        if s.strip()
     ]
     chunks: list[str] = []
     current = ""
@@ -377,7 +411,9 @@ async def _speak_kokoro(
         logger.info(f"tts kokoro: 截斷 {len(text)} → {_KOKORO_MAX_CHARS} 字")
         text = text[:_KOKORO_MAX_CHARS].rsplit(" ", 1)[0]  # 在空白處截斷避免斷字
 
-    chunks = _chunk_text(text, _KOKORO_CHUNK_CHARS if is_english else _KOKORO_CHUNK_CHARS_CJK)
+    chunks = _chunk_text(
+        text, _KOKORO_CHUNK_CHARS if is_english else _KOKORO_CHUNK_CHARS_CJK
+    )
     if not chunks:
         logger.info("tts kokoro: 沒有可念的內容，略過")
         return
@@ -389,14 +425,18 @@ async def _speak_kokoro(
         parts: list[Any] = []
         sample_rate = 24000
         for chunk in chunks:
-            samples, sample_rate = kokoro.create(chunk, voice=voice, speed=1.0, lang=lang)
+            samples, sample_rate = kokoro.create(
+                chunk, voice=voice, speed=1.0, lang=lang
+            )
             parts.append(samples)
         return np.concatenate(parts), sample_rate
 
     logger.info(f"tts kokoro generating: {len(text)} chars")
     _t0 = asyncio.get_event_loop().time()
     try:
-        samples, sample_rate = await asyncio.get_event_loop().run_in_executor(None, _generate)
+        samples, sample_rate = await asyncio.get_event_loop().run_in_executor(
+            None, _generate
+        )
     except Exception as e:
         logger.warning(f"tts kokoro 生成失敗：{e}")
         return
@@ -425,13 +465,15 @@ async def _speak_kokoro_api(
     import urllib.request
 
     url = f"http://{host}:{port}/v1/audio/speech"
-    payload = json.dumps({
-        "model": "kokoro",
-        "input": text,
-        "voice": voice,
-        "response_format": "wav",
-        "speed": speed,
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": "kokoro",
+            "input": text,
+            "voice": voice,
+            "response_format": "wav",
+            "speed": speed,
+        }
+    ).encode()
 
     def _fetch() -> bytes:
         req = urllib.request.Request(
@@ -450,7 +492,9 @@ async def _speak_kokoro_api(
     except Exception as e:
         logger.warning(f"tts kokoro-api 請求失敗：{e}")
         return
-    logger.info(f"tts kokoro-api generated in {asyncio.get_event_loop().time() - _t0:.1f}s")
+    logger.info(
+        f"tts kokoro-api generated in {asyncio.get_event_loop().time() - _t0:.1f}s"
+    )
 
     fd, tmp = tempfile.mkstemp(suffix=".wav", prefix="kai_tts_")
     os.close(fd)
@@ -460,16 +504,21 @@ async def _speak_kokoro_api(
         try:
             import numpy as np
             import soundfile as sf
+
             _data, _sr = sf.read(tmp)
             # 裁切末尾低於 -46dB 的雜音（模型 noise floor）
-            _energy = np.abs(_data) if _data.ndim == 1 else np.max(np.abs(_data), axis=1)
+            _energy = (
+                np.abs(_data) if _data.ndim == 1 else np.max(np.abs(_data), axis=1)
+            )
             _loud = np.where(_energy > 0.005)[0]
             _orig_s = len(_data) / _sr
             if len(_loud) > 0:
                 _end = min(_loud[-1] + int(_sr * 0.25), len(_data))
                 _data = _data[:_end]
             sf.write(tmp, _data, _sr)
-            logger.debug(f"tts kokoro-api: {_orig_s:.1f}s → {len(_data)/_sr:.1f}s (trimmed {_orig_s - len(_data)/_sr:.1f}s noise)")
+            logger.debug(
+                f"tts kokoro-api: {_orig_s:.1f}s → {len(_data) / _sr:.1f}s (trimmed {_orig_s - len(_data) / _sr:.1f}s noise)"
+            )
         except Exception as _e:
             logger.warning(f"tts kokoro-api: trim 失敗（仍嘗試播放）：{_e}")
         await _play_async(tmp, player)
@@ -500,12 +549,14 @@ async def _speak_azure(
     import urllib.request
     from . import config as _cfg
 
-    _key      = key      or _cfg.AZURE_TTS_KEY
+    _key = key or _cfg.AZURE_TTS_KEY
     _endpoint = endpoint or _cfg.AZURE_TTS_ENDPOINT
-    _region   = region   or _cfg.AZURE_TTS_REGION
+    _region = region or _cfg.AZURE_TTS_REGION
 
     if not _key:
-        logger.warning("tts azure: 需設定 AZURE_TTS_KEY（.env 或 agent config.json tts.key）")
+        logger.warning(
+            "tts azure: 需設定 AZURE_TTS_KEY（.env 或 agent config.json tts.key）"
+        )
         return
 
     # 決定 TTS REST endpoint
@@ -564,7 +615,9 @@ async def _speak_azure(
     except Exception as e:
         logger.warning(f"tts azure 請求失敗：{e}")
         return
-    logger.info(f"tts azure done in {asyncio.get_event_loop().time() - _t0:.1f}s  bytes={len(audio_bytes)}")
+    logger.info(
+        f"tts azure done in {asyncio.get_event_loop().time() - _t0:.1f}s  bytes={len(audio_bytes)}"
+    )
 
     fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="kai_tts_")
     os.close(fd)
@@ -596,7 +649,16 @@ async def speak(
         return
 
     if engine == "azure-tts":
-        await _speak_azure(text, voice=voice, lang=lang, speed=speed, key=key, region=region, endpoint=endpoint, player=player)
+        await _speak_azure(
+            text,
+            voice=voice,
+            lang=lang,
+            speed=speed,
+            key=key,
+            region=region,
+            endpoint=endpoint,
+            player=player,
+        )
         return
 
     if engine == "kokoro":
@@ -604,13 +666,20 @@ async def speak(
         return
 
     if engine == "kokoro-api":
-        await _speak_kokoro_api(text, voice=voice, speed=speed, host=host, port=port, player=player)
+        await _speak_kokoro_api(
+            text, voice=voice, speed=speed, host=host, port=port, player=player
+        )
         return
 
     if engine == "melotts":
         await _speak_melotts(
-            text, voice=voice, lang=lang.upper(),
-            speed=speed, host=host, port=port, player=player,
+            text,
+            voice=voice,
+            lang=lang.upper(),
+            speed=speed,
+            host=host,
+            port=port,
+            player=player,
         )
         return
 

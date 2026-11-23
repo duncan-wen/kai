@@ -1,4 +1,5 @@
 """Input widgets: HistoryInput and ChatAutoComplete."""
+
 from __future__ import annotations
 
 import re
@@ -51,12 +52,18 @@ class HistoryInput(Input):
     def _compress(self, text: str) -> None:
         """把長文字壓縮成 marker 格式，避免 Input 橫向 scroll。
         若 text 中含舊 marker，先展開成真實內容再重壓縮，確保 submit 時內容正確。"""
-        if self._multiline_marker and self._multiline_paste and self._multiline_marker in text:
+        if (
+            self._multiline_marker
+            and self._multiline_paste
+            and self._multiline_marker in text
+        ):
             text = text.replace(self._multiline_marker, self._multiline_paste, 1)
         self._multiline_paste = text
         # preview 取第一行避免 \n 混入 marker，否則 self.value 會是多行字串
         first_line = text.split("\n", 1)[0]
-        preview = first_line[:40] + ("…" if len(first_line) > 40 or "\n" in text else "")
+        preview = first_line[:40] + (
+            "…" if len(first_line) > 40 or "\n" in text else ""
+        )
         marker = f"[{len(text)} 字元] {preview}"
         self._multiline_marker = marker
         self.value = marker
@@ -76,7 +83,9 @@ class HistoryInput(Input):
         if "\n" not in text and "\r" not in text:
             # 單行貼上：若貼後總長超過閾值，壓縮（移除 _multiline_paste is None 限制）
             combined = (
-                self.value[: self.cursor_position] + text + self.value[self.cursor_position :]
+                self.value[: self.cursor_position]
+                + text
+                + self.value[self.cursor_position :]
             )
             if len(combined) > self._COMPRESS_THRESHOLD:
                 event.prevent_default()
@@ -139,7 +148,9 @@ class HistoryInput(Input):
         # 長文字先壓縮：確保 super()._watch_value 永遠只看到短值。
         # 若先呼叫 super() 再壓縮，Textual 會以 virtual_size=Size(N,1) 執行
         # scroll_to_region，可能在 terminal 留下超出 TUI canvas 的殘影。
-        if (len(value) > self._COMPRESS_THRESHOLD or "\n" in value) and not self._is_marker(value):
+        if (
+            len(value) > self._COMPRESS_THRESHOLD or "\n" in value
+        ) and not self._is_marker(value):
             self._compress(value)
             return  # _compress → self.value=marker → 重新進入此函式
         # marker 已不在 value（例如 Ctrl+U 清空後另輸文字），清除壓縮狀態避免舊內容被送出
@@ -194,7 +205,7 @@ class ChatAutoComplete(AutoComplete):
             return None
         if idx > 0 and text[idx - 1] not in " \t":
             return None  # @ 夾在字中間（如 email）
-        fragment = text[idx + 1:]
+        fragment = text[idx + 1 :]
         if " " in fragment:
             return None  # @ mention 已完成
         return fragment
@@ -331,7 +342,7 @@ class ChatAutoComplete(AutoComplete):
             target.cursor_position = len(value)
         elif self._at_prefix(text) is not None:
             at_idx = text.rfind("@")
-            new_val = text[:at_idx + 1] + value
+            new_val = text[: at_idx + 1] + value
             target.value = new_val
             target.cursor_position = len(new_val)
         elif text.startswith("!"):

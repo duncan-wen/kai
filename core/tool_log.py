@@ -7,6 +7,7 @@
   RESULT: (前 2000 字元，超過截斷)
   ────────────────────────────────────────────────────────────
 """
+
 from __future__ import annotations
 
 import json
@@ -58,7 +59,9 @@ def log_turn_start(turn: int, agent_dir: "Path | None" = None) -> None:
         pass
 
 
-def log_tool_call(tool_name: str, args: dict, result: str, agent_dir: "Path | None" = None) -> None:
+def log_tool_call(
+    tool_name: str, args: dict, result: str, agent_dir: "Path | None" = None
+) -> None:
     """記錄單次 tool call 的名稱、參數、回應。DEBUG_TOOLS=0 時直接返回。"""
     if not _cfg.DEBUG_TOOLS:
         return

@@ -1,4 +1,5 @@
 """langfuse_client 的 no-op fallback 與 helper 單元測試。"""
+
 from core import langfuse_client as lf
 from core.tools.dispatch import _mask_args
 from core.backends import _usage_details
@@ -45,7 +46,10 @@ def test_trim_messages_excludes_system_and_truncates():
 
 def test_trim_messages_handles_multimodal():
     msgs = [
-        {"role": "user", "content": [{"type": "text", "text": "看圖"}, {"type": "image_url"}]},
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "看圖"}, {"type": "image_url"}],
+        },
     ]
     out = lf.trim_messages(msgs)
     assert out == [{"role": "user", "content": "看圖"}]
@@ -88,6 +92,7 @@ def test_ascii_session_id_none():
 
 def test_subagent_dispatch_tools_set():
     from core.tools.dispatch import SUBAGENT_DISPATCH_TOOLS
+
     assert "send_to_agent" in SUBAGENT_DISPATCH_TOOLS
     assert "bash_exec" not in SUBAGENT_DISPATCH_TOOLS
 
@@ -164,7 +169,9 @@ def test_generation_messages_none_when_disabled(monkeypatch):
     class _A:
         _lf_gen_idx = 0
 
-    assert backends._generation_messages(_A(), [{"role": "user", "content": "x"}]) is None
+    assert (
+        backends._generation_messages(_A(), [{"role": "user", "content": "x"}]) is None
+    )
 
 
 def test_generation_messages_system_off_by_config(monkeypatch):
@@ -214,9 +221,13 @@ def test_trace_passes_message_input_to_sdk(monkeypatch):
             return _Obs()
 
     monkeypatch.setattr(lf, "get_langfuse", lambda: _Fake())
-    monkeypatch.setattr(langfuse, "propagate_attributes", lambda **kw: contextlib.nullcontext())
+    monkeypatch.setattr(
+        langfuse, "propagate_attributes", lambda **kw: contextlib.nullcontext()
+    )
 
-    with lf.trace(name="chat-turn", session_id="history-1", input=lf.user_message("hi")) as span:
+    with lf.trace(
+        name="chat-turn", session_id="history-1", input=lf.user_message("hi")
+    ) as span:
         assert span is not None
     assert captured["name"] == "chat-turn"
     assert captured["input"] == [{"role": "user", "content": "hi"}]
@@ -292,7 +303,13 @@ def test_trim_messages_keeps_tool_call_structure_openai():
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "w", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "w", "arguments": "{}"},
+                }
+            ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "晴"},
     ]
@@ -300,7 +317,13 @@ def test_trim_messages_keeps_tool_call_structure_openai():
     assert out[1] == {
         "role": "assistant",
         "content": "",
-        "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "w", "arguments": "{}"}}],
+        "tool_calls": [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "w", "arguments": "{}"},
+            }
+        ],
     }
     assert out[2] == {"role": "tool", "content": "晴", "tool_call_id": "c1"}
 
@@ -355,8 +378,16 @@ def test_usage_details_splits_cache_hit_into_exclusive_bucket():
 
 
 def test_usage_details_cache_hit_zero_or_none_keeps_plain_input():
-    assert _usage_details((10, 50), cache_hit=0) == {"input": 50, "output": 10, "total": 60}
-    assert _usage_details((10, 50), cache_hit=None) == {"input": 50, "output": 10, "total": 60}
+    assert _usage_details((10, 50), cache_hit=0) == {
+        "input": 50,
+        "output": 10,
+        "total": 60,
+    }
+    assert _usage_details((10, 50), cache_hit=None) == {
+        "input": 50,
+        "output": 10,
+        "total": 60,
+    }
 
 
 def test_usage_details_cache_hit_clamped_to_input():
@@ -399,9 +430,19 @@ def test_mask_secrets_leaves_token_counts_alone():
 
 
 def test_mask_secrets_keeps_chatml_structure():
-    msgs = [{"role": "assistant", "content": "", "tool_calls": [
-        {"id": "call_1", "type": "function", "function": {"name": "bash_exec", "arguments": "{}"}},
-    ]}]
+    msgs = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "bash_exec", "arguments": "{}"},
+                },
+            ],
+        }
+    ]
     assert lf.mask_secrets(data=msgs) == msgs
 
 
@@ -433,7 +474,9 @@ def test_mask_secrets_learns_values_from_assignments(monkeypatch):
     """賦值裡認出的值，之後單獨出現（例如模型 thinking 引用）也要遮。"""
     monkeypatch.setattr(lf, "_learned_secrets", set())
     lf.mask_secrets(data="用 bash 執行 echo DEMO_API_KEY=abc12345secret")
-    out = lf.mask_secrets(data={"thinking": '"abc12345secret" looks like a placeholder'})
+    out = lf.mask_secrets(
+        data={"thinking": '"abc12345secret" looks like a placeholder'}
+    )
     assert "abc12345secret" not in out["thinking"]
 
 

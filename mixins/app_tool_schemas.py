@@ -38,8 +38,11 @@ DESIGN_SYSTEM_PROMPT_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "name":        {"type": "string", "description": "agent 名稱"},
-                "description": {"type": "string", "description": "agent 的詳細用途描述"},
+                "name": {"type": "string", "description": "agent 名稱"},
+                "description": {
+                    "type": "string",
+                    "description": "agent 的詳細用途描述",
+                },
             },
             "required": ["name", "description"],
         },
@@ -118,11 +121,26 @@ CREATE_SKILL_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "skill 名稱（同時用作目錄名，建議 kebab-case 英文）"},
-                "description": {"type": "string", "description": "一行描述這個 skill 的用途"},
-                "body": {"type": "string", "description": "SKILL.md 本體：給模型的詳細操作步驟（Markdown）"},
-                "when_to_use": {"type": "string", "description": "觸發時機說明，可省略"},
-                "global_scope": {"type": "boolean", "description": "預設 false。true = 存到 ~/.kai/skills/（跨專案）；false = 存到 .kai/skills/（專案）"},
+                "name": {
+                    "type": "string",
+                    "description": "skill 名稱（同時用作目錄名，建議 kebab-case 英文）",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "一行描述這個 skill 的用途",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "SKILL.md 本體：給模型的詳細操作步驟（Markdown）",
+                },
+                "when_to_use": {
+                    "type": "string",
+                    "description": "觸發時機說明，可省略",
+                },
+                "global_scope": {
+                    "type": "boolean",
+                    "description": "預設 false。true = 存到 ~/.kai/skills/（跨專案）；false = 存到 .kai/skills/（專案）",
+                },
             },
             "required": ["name", "description", "body"],
         },
@@ -179,10 +197,20 @@ ADD_MCP_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "name":    {"type": "string",  "description": "server 名稱"},
-                "command": {"type": "string",  "description": "執行指令，例如 'npx'（與 url 二選一）"},
-                "args":    {"type": "array",   "items": {"type": "string"}, "description": "指令參數列表"},
-                "url":     {"type": "string",  "description": "HTTP/SSE URL（與 command 二選一）"},
+                "name": {"type": "string", "description": "server 名稱"},
+                "command": {
+                    "type": "string",
+                    "description": "執行指令，例如 'npx'（與 url 二選一）",
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "指令參數列表",
+                },
+                "url": {
+                    "type": "string",
+                    "description": "HTTP/SSE URL（與 command 二選一）",
+                },
             },
             "required": ["name"],
         },
@@ -232,7 +260,10 @@ TOGGLE_GREETING_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "enabled": {"type": "boolean", "description": "true = 開啟 greeting，false = 關閉 greeting"},
+                "enabled": {
+                    "type": "boolean",
+                    "description": "true = 開啟 greeting，false = 關閉 greeting",
+                },
             },
             "required": ["enabled"],
         },
@@ -252,7 +283,10 @@ SET_TTS_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "engine": {"type": "string", "description": "語音引擎：edge-tts / azure-tts / melotts / kokoro-api / kokoro / off"},
+                "engine": {
+                    "type": "string",
+                    "description": "語音引擎：edge-tts / azure-tts / melotts / kokoro-api / kokoro / off",
+                },
             },
             "required": ["engine"],
         },
@@ -293,7 +327,10 @@ CLOSE_AGENT_TOOL = {
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "agent 名稱或暱稱，省略則關閉目前 agent tab"},
+                "name": {
+                    "type": "string",
+                    "description": "agent 名稱或暱稱，省略則關閉目前 agent tab",
+                },
             },
             "required": [],
         },

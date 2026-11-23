@@ -1,4 +1,5 @@
 """BashMixin — ! 指令執行邏輯。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,11 @@ class BashMixin(_MixinBase):
     @work
     async def _run_bash(self, cmd: str) -> None:
         stripped = cmd.strip()
-        if stripped == "cd" or stripped.startswith("cd ") or stripped.startswith("cd\t"):
+        if (
+            stripped == "cd"
+            or stripped.startswith("cd ")
+            or stripped.startswith("cd\t")
+        ):
             arg = stripped[2:].strip() or str(Path.home())
             try:
                 await self._do_cd(arg)
@@ -37,7 +42,9 @@ class BashMixin(_MixinBase):
 
         msgs = self._active_msgs()
         prompt = self.query_one("#prompt", HistoryInput)
-        await msgs.mount(Static(f"[bold]$[/bold] {cmd}", markup=True, classes="user-bubble"))
+        await msgs.mount(
+            Static(f"[bold]$[/bold] {cmd}", markup=True, classes="user-bubble")
+        )
         msgs.scroll_end(animate=False)
         prompt.disabled = True
         prompt.add_class("streaming")
@@ -51,7 +58,9 @@ class BashMixin(_MixinBase):
                 "COLUMNS": "120",
             }
             proc = await asyncio.create_subprocess_exec(
-                "/bin/bash", "-c", cmd,
+                "/bin/bash",
+                "-c",
+                cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -93,7 +102,9 @@ class BashMixin(_MixinBase):
                 lines.append(f"\n⏱ 逾時（>{BASH_TIMEOUT}s）")
                 _refresh()
         except Exception as e:
-            await msgs.mount(Static(f"❌ {e or type(e).__name__}", markup=False, classes="error-msg"))
+            await msgs.mount(
+                Static(f"❌ {e or type(e).__name__}", markup=False, classes="error-msg")
+            )
         finally:
             msgs.scroll_end(animate=False)
             prompt.disabled = False

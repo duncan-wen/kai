@@ -25,7 +25,11 @@ from .models import REGISTRY, ModelProfile, get_profile
 from .tool_log import log_tool_call, log_turn_start
 from .langfuse_client import (
     get_langfuse,
-    trace, generation, system_fingerprint, user_message, assistant_message,
+    trace,
+    generation,
+    system_fingerprint,
+    user_message,
+    assistant_message,
 )
 from .session_store import SessionStore
 from .tools import (
@@ -54,14 +58,20 @@ if TYPE_CHECKING:
     from .agent_factory import AgentDefinition
 
 
-
 # /compact 未設 COMPACT_MODEL 時的預設模型；必須是 REGISTRY 內的現行名稱
 # （DeepSeek 曾把 deepseek-v4-flash 更名為 deepseek-flash，寫死舊名會讓 /compact 失敗）
 COMPACT_FALLBACK_DEEPSEEK = "deepseek-flash"
 COMPACT_FALLBACK_GEMINI = "gemini-2.5-flash"
 
+
 class Agent:
-    def __init__(self, model: str, history_file: "Path | None" = None, agent_dir: "Path | None" = None, system_prompt: str | None = None):
+    def __init__(
+        self,
+        model: str,
+        history_file: "Path | None" = None,
+        agent_dir: "Path | None" = None,
+        system_prompt: str | None = None,
+    ):
         self.profile: ModelProfile = get_profile(model)
         self.history: list[dict] = []
         # 工具對映表：新工具只需在這裡登記
@@ -73,7 +83,9 @@ class Agent:
             "use_skill": use_skill,
             "list_skills": list_skills,
         }
-        self.datasets: list[str] = []  # 此 agent 可查的 Dify KB ID 清單（空 = 不啟用 RAG）
+        self.datasets: list[
+            str
+        ] = []  # 此 agent 可查的 Dify KB ID 清單（空 = 不啟用 RAG）
         self._dify_table: str = ""  # fetch_dify_datasets
         self._chat_lock: asyncio.Lock = asyncio.Lock()  # 防止並發 chat() 呼叫
         # app-level tools（由 ChatApp._inject_app_tools 注入，只有 main agent 有）
@@ -86,12 +98,18 @@ class Agent:
         self.mcp_context: str = ""
         self.last_prediction: str = ""
         self._cancelled = False
-        self.tts_config: dict | None = None  # 由 apply_definition 設定；None 表示不啟用 TTS
-        self.nickname: str | None = None    # agent tab 的顯示暱稱；不寫 os.environ 以免污染 main agent
+        self.tts_config: dict | None = (
+            None  # 由 apply_definition 設定；None 表示不啟用 TTS
+        )
+        self.nickname: str | None = (
+            None  # agent tab 的顯示暱稱；不寫 os.environ 以免污染 main agent
+        )
         self.mcp_enabled: bool = True  # definition 的 mcp_servers 設為 {} 時為 False
         self._in_turn: bool = False  # chat() 執行中
         self._pending_model: str | None = None  # turn 中途要求換的模型，turn 結束後生效
-        self._lf_gen_idx: int = 0  # 本 turn 第幾次模型呼叫（Langfuse 用來決定 system prompt 記法）
+        self._lf_gen_idx: int = (
+            0  # 本 turn 第幾次模型呼叫（Langfuse 用來決定 system prompt 記法）
+        )
         # agent 專屬目錄（存 history.json / notes.md；None 表示用 cwd/.kai）
         self._agent_dir: "Path | None" = agent_dir
         self._history_file: Path = history_file or HISTORY_FILE
@@ -127,6 +145,7 @@ class Agent:
         """
         agent_dir_str = str(base_dir.resolve())
         now = datetime.now().strftime("%Y-%m-%d")
+
         def _do_include(m: re.Match) -> str:
             fname = m.group(1).strip()
             fpath = base_dir / fname
@@ -149,12 +168,20 @@ class Agent:
         """
         skills_idx = skills_index_text()
         if self._custom_system_prompt is not None:
-            notes_root = self._agent_dir if self._agent_dir else Path(os.getcwd()) / ".kai"
+            notes_root = (
+                self._agent_dir if self._agent_dir else Path(os.getcwd()) / ".kai"
+            )
             notes_path = notes_root / "notes.md"
-            notes = notes_path.read_text(encoding="utf-8").strip() if notes_path.exists() else ""
+            notes = (
+                notes_path.read_text(encoding="utf-8").strip()
+                if notes_path.exists()
+                else ""
+            )
             now = datetime.now().strftime("%Y-%m-%d")
             date_line = f"目前時間是 {now}（台灣時區 UTC+8）。使用者的名字是 {_cfg.USERNAME}。\n\n"
-            content = date_line + self._resolve_prompt(self._custom_system_prompt, notes_root)
+            content = date_line + self._resolve_prompt(
+                self._custom_system_prompt, notes_root
+            )
             if notes:
                 content += f"\n\n## 📝 專案記憶\n{notes}\n\n以上規則必須嚴格遵守。"
             if skills_idx:
@@ -170,13 +197,21 @@ class Agent:
         now = datetime.now().strftime("%Y-%m-%d")
         tool_names: set[str] = self.mcp_client.tool_names if self.mcp_client else set()
         has_mcp = bool(tool_names)
-        has_playwright = bool(tool_names & {"browser_navigate", "browser_click", "browser_snapshot"})
-        has_filesystem = bool(tool_names & {"read_file", "write_file", "list_directory"})
+        has_playwright = bool(
+            tool_names & {"browser_navigate", "browser_click", "browser_snapshot"}
+        )
+        has_filesystem = bool(
+            tool_names & {"read_file", "write_file", "list_directory"}
+        )
         has_repomapper = bool(tool_names & {"repo_map", "search_identifiers"})
         cwd = os.getcwd()
         notes_root = self._agent_dir if self._agent_dir else Path(cwd) / ".kai"
         notes_path = notes_root / "notes.md"
-        notes = notes_path.read_text(encoding="utf-8").strip() if notes_path.exists() else ""
+        notes = (
+            notes_path.read_text(encoding="utf-8").strip()
+            if notes_path.exists()
+            else ""
+        )
 
         # 動態生成已連線 server 清單
         if has_mcp and self.mcp_client:
@@ -206,8 +241,7 @@ class Agent:
                     else ""
                 )
                 + (
-                    f"\n\n## 📝 專案記憶\n{notes}"
-                    "\n\n以上規則必須嚴格遵守。"
+                    f"\n\n## 📝 專案記憶\n{notes}\n\n以上規則必須嚴格遵守。"
                     if notes
                     else ""
                 )
@@ -224,19 +258,36 @@ class Agent:
                     + (f"\n- {self.mcp_context.strip()}" if self.mcp_context else "")
                     + f"\n\n## 📁 工作目錄\n- 目前工作目錄：{cwd}"
                     + "\n\n## 🚫 工具優先順序與嚴格限制（違反將導致任務失敗）"
-                    + (lambda rules: "\n" + "\n".join(f"{i+1}. {r}" for i, r in enumerate(rules)))(
-                        ([
-                            "瀏覽器操作：僅限使用 Playwright MCP 工具（如 browser_navigate, browser_click）。嚴禁用 bash 執行 node / npx / playwright CLI。",
-                        ] if has_playwright else [])
-                        + ([
-                            "檔案讀寫：僅限使用 FileSystem MCP 工具（如 read_file, write_file, list_directory）。嚴禁用 bash 執行 cat / ls / cp。",
-                        ] if has_filesystem else [])
+                    + (
+                        lambda rules: (
+                            "\n"
+                            + "\n".join(f"{i + 1}. {r}" for i, r in enumerate(rules))
+                        )
+                    )(
+                        (
+                            [
+                                "瀏覽器操作：僅限使用 Playwright MCP 工具（如 browser_navigate, browser_click）。嚴禁用 bash 執行 node / npx / playwright CLI。",
+                            ]
+                            if has_playwright
+                            else []
+                        )
+                        + (
+                            [
+                                "檔案讀寫：僅限使用 FileSystem MCP 工具（如 read_file, write_file, list_directory）。嚴禁用 bash 執行 cat / ls / cp。",
+                            ]
+                            if has_filesystem
+                            else []
+                        )
                         + [
                             "系統指令：bash_exec 僅限用於 MCP 無法涵蓋的純系統操作（如 git, uv, ping）。",
                         ]
-                        + ([
-                            "環境安全：**絕對禁止**用 bash 執行 npm install / npx / node，嚴禁在專案目錄安裝任何 npm 套件。",
-                        ] if has_playwright else [])
+                        + (
+                            [
+                                "環境安全：**絕對禁止**用 bash 執行 npm install / npx / node，嚴禁在專案目錄安裝任何 npm 套件。",
+                            ]
+                            if has_playwright
+                            else []
+                        )
                         + [
                             f"檔案輸出：截圖、下載或建立新檔案時，必須儲存於「目前工作目錄」（{cwd}），並於回覆中提供明確的絕對路徑。",
                         ]
@@ -244,13 +295,15 @@ class Agent:
                     + "\n\n## 🛠️ 執行與排錯 SOP"
                     + (
                         f"\n- 程式碼探索：需要了解專案結構或函數定義時，**優先呼叫 `repo_map` 工具**（傳入 project_root=`{cwd}`）取得整體地圖；需定位特定函數或類別時用 `search_identifiers`。嚴禁用 bash cat 逐檔讀取來理解專案架構。"
-                        if has_repomapper else ""
+                        if has_repomapper
+                        else ""
                     )
                     + (
                         "\n- 逐步執行：複雜任務請分步進行。網頁操作需確認目標元素已存在於頁面結構中，再進行點擊或截圖。"
                         "\n- 嚴禁盲目重試：當 browser 操作因 selector 找不到元素失敗時，**嚴禁用相同 selector 重試**。必須立即呼叫 `browser_snapshot`（不帶 filename 參數），讀取回傳的頁面結構，找出正確的 ref 或描述後再繼續。"
-                        "\n- 參數限制：`browser_take_screenshot` 的 `type` 參數僅接受 \"png\" 或 \"jpeg\"，不需要時請省略。"
-                        if has_playwright else ""
+                        '\n- 參數限制：`browser_take_screenshot` 的 `type` 參數僅接受 "png" 或 "jpeg"，不需要時請省略。'
+                        if has_playwright
+                        else ""
                     )
                     + "\n- 嚴禁捏造：回答必須基於工具回傳的真實資料，工具失敗時誠實告知。"
                     "\n- 任務收尾：完成任務後，必須用文字清楚總結最終結果與狀態，不得無聲結束對話。"
@@ -304,14 +357,19 @@ class Agent:
         if defn.model != self.profile.name:
             if defn.model in REGISTRY:
                 applied = self.switch_model(defn.model)
-                changes.append(f"model → {defn.model}" + ("" if applied else "（這則回覆結束後生效）"))
+                changes.append(
+                    f"model → {defn.model}"
+                    + ("" if applied else "（這則回覆結束後生效）")
+                )
             else:
                 changes.append(f"⚠️ 未知模型：{defn.model}，保留 {self.profile.name}")
 
         self._custom_system_prompt = defn.system_prompt
         self.nickname = defn.display_name
         self.tts_config = defn.tts
-        self.history_keep = defn.history_keep if defn.history_keep is not None else HISTORY_KEEP
+        self.history_keep = (
+            defn.history_keep if defn.history_keep is not None else HISTORY_KEEP
+        )
         self.datasets = list(defn.datasets)
         self.mcp_enabled = defn.mcp_servers != {}
         if not self.mcp_enabled:
@@ -353,7 +411,9 @@ class Agent:
                     filtered.append(msg)
 
                 self.history.extend(filtered)
-                logger.debug(f"載入 {len(filtered)} 則歷史訊息，來自 {self._history_file}")
+                logger.debug(
+                    f"載入 {len(filtered)} 則歷史訊息，來自 {self._history_file}"
+                )
             except Exception as e:
                 logger.warning(f"載入歷史失敗：{e}")
 
@@ -378,7 +438,7 @@ class Agent:
         keep = self.history_keep if self.history_keep else HISTORY_KEEP
         system = [m for m in self.history if m["role"] == "system"]
         rest = [m for m in self.history if m["role"] != "system"]
-        to_save = system + rest[-(keep * 2):]
+        to_save = system + rest[-(keep * 2) :]
         try:
             self._history_file.parent.mkdir(parents=True, exist_ok=True)
             self._history_file.write_text(
@@ -393,7 +453,9 @@ class Agent:
         """用 gemini-2.0-flash 摘要現有 history，壓縮 context。回傳摘要文字。"""
         _compact_client = self._gemini or self._deepseek
         if not _compact_client:
-            raise RuntimeError("需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能使用 compact")
+            raise RuntimeError(
+                "需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能使用 compact"
+            )
 
         parts = []
         for msg in self.history:
@@ -422,9 +484,10 @@ class Agent:
             f"對話歷史：\n\n{conversation}"
         )
 
-        _compact_model = (
-            _cfg.COMPACT_MODEL
-            or (COMPACT_FALLBACK_DEEPSEEK if not self._gemini and self._deepseek else COMPACT_FALLBACK_GEMINI)
+        _compact_model = _cfg.COMPACT_MODEL or (
+            COMPACT_FALLBACK_DEEPSEEK
+            if not self._gemini and self._deepseek
+            else COMPACT_FALLBACK_GEMINI
         )
         with generation(
             name="compact-history",
@@ -444,11 +507,15 @@ class Agent:
                     usage_details={
                         "input": getattr(_usage, "prompt_tokens", 0) or 0,
                         "output": getattr(_usage, "completion_tokens", 0) or 0,
-                    } if _usage is not None else None,
+                    }
+                    if _usage is not None
+                    else None,
                 )
 
         system = [m for m in self.history if m["role"] == "system"]
-        self.history = system + [{"role": "assistant", "content": f"[對話摘要]\n{summary}"}]
+        self.history = system + [
+            {"role": "assistant", "content": f"[對話摘要]\n{summary}"}
+        ]
         self.save_history()
         logger.info(f"compact_history 完成，history 壓縮至 {len(self.history)} 則")
         return summary
@@ -458,7 +525,7 @@ class Agent:
         keep = self.history_keep if self.history_keep else HISTORY_KEEP
         system = [m for m in self.history if m["role"] == "system"]
         rest = [m for m in self.history if m["role"] != "system"]
-        kept = system + rest[-(keep * 2):]
+        kept = system + rest[-(keep * 2) :]
         return [{k: v for k, v in m.items() if not k.startswith("_")} for m in kept]
 
     def _trim_tool_result(self, content: str) -> str:
@@ -468,11 +535,20 @@ class Agent:
             content = re.sub(r"\s+", " ", content).strip()
         if len(content) > _cfg.MAX_SEARCH_CHARS:
             content = (
-                content[:_cfg.MAX_SEARCH_CHARS] + f"\n...[已截斷，共 {len(content)} 字元]"
+                content[: _cfg.MAX_SEARCH_CHARS]
+                + f"\n...[已截斷，共 {len(content)} 字元]"
             )
         return content
 
-    async def chat(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
+    async def chat(
+        self,
+        user_msg: dict,
+        on_token=None,
+        on_thinking=None,
+        on_done=None,
+        on_tool_call=None,
+        on_retry=None,
+    ):
         """單輪對話；turn 中途要求的換模型在 turn 結束後才生效。"""
         self._in_turn = True
         self._lf_gen_idx = 0
@@ -506,7 +582,9 @@ class Agent:
             },
         ) as _span:
             try:
-                return await self._run_turn(user_msg, on_token, on_thinking, on_done, on_tool_call, on_retry)
+                return await self._run_turn(
+                    user_msg, on_token, on_thinking, on_done, on_tool_call, on_retry
+                )
             finally:
                 self._in_turn = False
                 if self._pending_model:
@@ -515,7 +593,11 @@ class Agent:
                 if _span is not None:
                     _reply = self._turn_reply_text(user_msg)
                     _sys = next(
-                        (m.get("content") for m in self.history if m.get("role") == "system"),
+                        (
+                            m.get("content")
+                            for m in self.history
+                            if m.get("role") == "system"
+                        ),
                         "",
                     )
                     _sys_text = str(_sys or "")
@@ -546,12 +628,20 @@ class Agent:
         start = next((i for i, m in enumerate(self.history) if m is user_msg), None)
         if start is None:
             return ""
-        for m in reversed(self.history[start + 1:]):
+        for m in reversed(self.history[start + 1 :]):
             if isinstance(m, dict) and m.get("role") == "assistant":
                 return str(m.get("content") or "")
         return ""
 
-    async def _run_turn(self, user_msg: dict, on_token=None, on_thinking=None, on_done=None, on_tool_call=None, on_retry=None):
+    async def _run_turn(
+        self,
+        user_msg: dict,
+        on_token=None,
+        on_thinking=None,
+        on_done=None,
+        on_tool_call=None,
+        on_retry=None,
+    ):
         """
         單輪對話入口，支援 tool calling loop：
           1. 呼叫模型（stream）
@@ -563,6 +653,7 @@ class Agent:
 
         if self.datasets:
             from core.tools.dify import fetch_dify_datasets
+
             self._dify_table = await fetch_dify_datasets(self.datasets)
         self._rebuild_system_prompt()
         self.history.append(user_msg)
@@ -598,15 +689,33 @@ class Agent:
 
             try:
                 if self.profile.backend in ("gemini", "deepseek"):
-                    _client = self._gemini if self.profile.backend == "gemini" else self._deepseek
+                    _client = (
+                        self._gemini
+                        if self.profile.backend == "gemini"
+                        else self._deepseek
+                    )
                     await stream_openai_compat(
-                        self, _client, messages, active_tools, reply_parts, tool_calls, thinking_parts,
-                        on_token, on_thinking,
+                        self,
+                        _client,
+                        messages,
+                        active_tools,
+                        reply_parts,
+                        tool_calls,
+                        thinking_parts,
+                        on_token,
+                        on_thinking,
                     )
                 else:
                     await stream_ollama(
-                        self, messages, active_tools, reply_parts, tool_calls, thinking_parts,
-                        on_token, on_thinking, on_retry,
+                        self,
+                        messages,
+                        active_tools,
+                        reply_parts,
+                        tool_calls,
+                        thinking_parts,
+                        on_token,
+                        on_thinking,
+                        on_retry,
                     )
             except Exception as e:
                 logger.error(f"模型串流錯誤：{e}")
@@ -642,16 +751,25 @@ class Agent:
                     if self.history and self.history[-1]["role"] == "user":
                         self.history.pop()
                     if on_done:
-                        await on_done(t_total, self._t_thinking_end and self._t_thinking_end - t_start, usage[0], usage[1])
+                        await on_done(
+                            t_total,
+                            self._t_thinking_end and self._t_thinking_end - t_start,
+                            usage[0],
+                            usage[1],
+                        )
                     return
                 _full_reply = "".join(reply_parts)
-                _next_m = re.search(r"\s*<next>(.*?)</next>\s*$", _full_reply, re.DOTALL)
+                _next_m = re.search(
+                    r"\s*<next>(.*?)</next>\s*$", _full_reply, re.DOTALL
+                )
                 if _next_m:
                     predicted = _next_m.group(1).strip()
                     _full_reply = _full_reply[: _next_m.start()].rstrip()
                     # 超過 50 字代表模型把回覆內容誤放進 <next>，不顯示為 ghost text
                     self.last_prediction = predicted if len(predicted) <= 50 else ""
-                    logger.debug(f"<next> extracted ({len(predicted)}): {repr(predicted)}")
+                    logger.debug(
+                        f"<next> extracted ({len(predicted)}): {repr(predicted)}"
+                    )
                 else:
                     self.last_prediction = ""
                 assistant_msg: dict = {"role": "assistant", "content": _full_reply}
@@ -661,7 +779,12 @@ class Agent:
                 self._rotate_history()
                 self.save_history()
                 if on_done:
-                    await on_done(t_total, self._t_thinking_end and self._t_thinking_end - t_start, usage[0], usage[1])
+                    await on_done(
+                        t_total,
+                        self._t_thinking_end and self._t_thinking_end - t_start,
+                        usage[0],
+                        usage[1],
+                    )
                 return
 
             # Build assistant message with tool calls (format differs by backend)
@@ -677,7 +800,9 @@ class Agent:
                                 "name": tc.function.name,
                                 "arguments": tc.function.arguments
                                 if isinstance(tc.function.arguments, str)
-                                else json.dumps(tc.function.arguments, ensure_ascii=False),
+                                else json.dumps(
+                                    tc.function.arguments, ensure_ascii=False
+                                ),
                             },
                         }
                         for tc in tool_calls
@@ -687,11 +812,13 @@ class Agent:
                     _asst["reasoning_content"] = "".join(thinking_parts)
                 messages.append(_asst)
             else:
-                messages.append({
-                    "role": "assistant",
-                    "content": "".join(reply_parts),
-                    "tool_calls": tool_calls,
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": "".join(reply_parts),
+                        "tool_calls": tool_calls,
+                    }
+                )
 
             _dispatch_map = {**self.tools_map, **self.extra_tools_map}
             results = await asyncio.gather(
@@ -717,18 +844,22 @@ class Agent:
             # Tool result messages (format differs by backend)
             if self.profile.backend in ("gemini", "deepseek"):
                 for tc, tr in zip(tool_calls, results):
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": self._trim_tool_result(tr.output),
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": self._trim_tool_result(tr.output),
+                        }
+                    )
             else:
                 for tr in results:
-                    messages.append({
-                        "role": "tool",
-                        "content": self._trim_tool_result(tr.output),
-                        "name": tr.fn_name,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "content": self._trim_tool_result(tr.output),
+                            "name": tr.fn_name,
+                        }
+                    )
 
             tool_call_count += 1
             if tool_call_count >= _cfg.MAX_TOOL_CALLS:
@@ -743,5 +874,7 @@ class Agent:
                 self._rotate_history()
                 self.save_history()
                 if on_tool_call:
-                    raise RuntimeError(f"已達工具呼叫上限 {_cfg.MAX_TOOL_CALLS} 次，對話強制結束")
+                    raise RuntimeError(
+                        f"已達工具呼叫上限 {_cfg.MAX_TOOL_CALLS} 次，對話強制結束"
+                    )
                 return

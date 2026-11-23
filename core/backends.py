@@ -4,6 +4,7 @@ Each function takes an Agent instance as first argument and mutates its
 _last_usage / _last_cache_hit / _t_thinking_end fields in-place, the same
 way the former Agent methods did.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +23,12 @@ from openai import AsyncOpenAI
 
 from . import config as _cfg
 from .tools import clean_thinking
-from .langfuse_client import GENERATION_NAME, generation, generation_output, trim_messages
+from .langfuse_client import (
+    GENERATION_NAME,
+    generation,
+    generation_output,
+    trim_messages,
+)
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -40,10 +46,12 @@ def _to_openai_messages(messages: list[dict]) -> list[dict]:
             p = Path(img_path)
             mime = mimetypes.guess_type(img_path)[0] or "image/png"
             b64 = base64.b64encode(p.read_bytes()).decode()
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                }
+            )
         result.append({"role": msg["role"], "content": content})
     return result
 
@@ -137,7 +145,12 @@ async def stream_ollama(
                         think=agent.profile.supports_thinking,
                         tools=active_tools,
                         stream=True,
-                        options={"num_ctx": agent.profile.num_ctx, "temperature": _cfg.TEMPERATURE, "top_k": _cfg.TOP_K, "top_p": _cfg.TOP_P},
+                        options={
+                            "num_ctx": agent.profile.num_ctx,
+                            "temperature": _cfg.TEMPERATURE,
+                            "top_k": _cfg.TOP_K,
+                            "top_p": _cfg.TOP_P,
+                        },
                     )
                 except httpx.ConnectError:
                     raise
@@ -146,16 +159,25 @@ async def stream_ollama(
                     _it = stream.__aiter__()
                     while True:
                         try:
-                            chunk = await asyncio.wait_for(_it.__anext__(), timeout=_cfg.OLLAMA_STREAM_TIMEOUT)
+                            chunk = await asyncio.wait_for(
+                                _it.__anext__(), timeout=_cfg.OLLAMA_STREAM_TIMEOUT
+                            )
                         except StopAsyncIteration:
                             break
                         except asyncio.TimeoutError:
-                            raise asyncio.TimeoutError(f"Ollama 超過 {_cfg.OLLAMA_STREAM_TIMEOUT}s 未回應，可能已卡住")
+                            raise asyncio.TimeoutError(
+                                f"Ollama 超過 {_cfg.OLLAMA_STREAM_TIMEOUT}s 未回應，可能已卡住"
+                            )
                         if agent._cancelled:
                             break
                         msg = chunk.message
-                        agent._last_usage = (getattr(chunk, "eval_count", None), getattr(chunk, "prompt_eval_count", None))
-                        if _first_token_at is None and (msg.thinking or msg.content or msg.tool_calls):
+                        agent._last_usage = (
+                            getattr(chunk, "eval_count", None),
+                            getattr(chunk, "prompt_eval_count", None),
+                        )
+                        if _first_token_at is None and (
+                            msg.thinking or msg.content or msg.tool_calls
+                        ):
                             _first_token_at = _now()
 
                         if msg.thinking:
@@ -177,7 +199,9 @@ async def stream_ollama(
                 except ollama.ResponseError as e:
                     if "XML syntax error" in str(e) and _xml_retry < _XML_RETRY_MAX:
                         _xml_retry += 1
-                        logger.warning(f"XML 解析錯誤，第 {_xml_retry}/{_XML_RETRY_MAX} 次重試：{e}")
+                        logger.warning(
+                            f"XML 解析錯誤，第 {_xml_retry}/{_XML_RETRY_MAX} 次重試：{e}"
+                        )
                         reply_parts.clear()
                         tool_calls.clear()
                         thinking_parts.clear()
@@ -253,12 +277,19 @@ async def stream_openai_compat(
                 if agent._cancelled:
                     break
                 if chunk.usage:
-                    agent._last_usage = (chunk.usage.completion_tokens, chunk.usage.prompt_tokens)
+                    agent._last_usage = (
+                        chunk.usage.completion_tokens,
+                        chunk.usage.prompt_tokens,
+                    )
                     hit = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
                     if hit is None and getattr(chunk.usage, "model_extra", None):
                         hit = chunk.usage.model_extra.get("prompt_cache_hit_tokens")
                     if hit is None:  # OpenAI / Gemini 形式
-                        hit = getattr(getattr(chunk.usage, "prompt_tokens_details", None), "cached_tokens", None)
+                        hit = getattr(
+                            getattr(chunk.usage, "prompt_tokens_details", None),
+                            "cached_tokens",
+                            None,
+                        )
                     if hit is not None:
                         agent._last_cache_hit = hit
                 if not chunk.choices:
@@ -271,7 +302,9 @@ async def stream_openai_compat(
                     else None
                 )
                 # 首個實質輸出（思考 / 文字 / 工具呼叫）才算首 token；第一個 chunk 常只帶 role
-                if _first_token_at is None and (reasoning or delta.content or delta.tool_calls):
+                if _first_token_at is None and (
+                    reasoning or delta.content or delta.tool_calls
+                ):
                     _first_token_at = _now()
                 if reasoning:
                     thinking_parts.append(reasoning)
@@ -285,7 +318,7 @@ async def stream_openai_compat(
                     if on_token:
                         await on_token(delta.content)
 
-                for tc_chunk in (delta.tool_calls or []):
+                for tc_chunk in delta.tool_calls or []:
                     i = tc_chunk.index
                     if i not in _tc_buf:
                         _tc_buf[i] = {"id": tc_chunk.id or "", "name": "", "args": ""}
@@ -295,16 +328,20 @@ async def stream_openai_compat(
 
             for idx in sorted(_tc_buf):
                 d = _tc_buf[idx]
-                tool_calls.append(SimpleNamespace(
-                    id=d["id"],
-                    function=SimpleNamespace(name=d["name"], arguments=d["args"]),
-                ))
+                tool_calls.append(
+                    SimpleNamespace(
+                        id=d["id"],
+                        function=SimpleNamespace(name=d["name"], arguments=d["args"]),
+                    )
+                )
         finally:
             if gen is not None:
                 # ChatML 訊息陣列（含 tool_calls），Session 視圖才能把這一步串進對話
                 gen.update(
                     output=generation_output("".join(reply_parts), tool_calls),
                     metadata=_generation_metadata(agent, thinking_parts),
-                    usage_details=_usage_details(agent._last_usage, agent._last_cache_hit),
+                    usage_details=_usage_details(
+                        agent._last_usage, agent._last_cache_hit
+                    ),
                     completion_start_time=_first_token_at,
                 )

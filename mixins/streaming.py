@@ -1,4 +1,5 @@
 """StreamingMixin — AI 串流回覆 worker。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,13 @@ SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 class StreamingMixin(_MixinBase):
     @work(exclusive=True)
-    async def _send(self, text: str, images: list[str] | None = None, ephemeral: bool = False, original_text: str | None = None) -> None:
+    async def _send(
+        self,
+        text: str,
+        images: list[str] | None = None,
+        ephemeral: bool = False,
+        original_text: str | None = None,
+    ) -> None:
         # 快照 agent 與 msgs：worker 執行期間 self.agent 可能因 tab 切換被替換，
         # 固定使用送出當下的 agent，避免回覆跑到錯誤的 tab。
         agent = self.agent
@@ -42,6 +49,7 @@ class StreamingMixin(_MixinBase):
         # 記錄本次 streaming 所屬的 tab_id
         try:
             from textual.widgets import TabbedContent as _TC
+
             _my_tab_id = self.query_one("#center-tabs", _TC).active or "chat"
         except Exception:
             _my_tab_id = "chat"
@@ -55,7 +63,9 @@ class StreamingMixin(_MixinBase):
         def _tick() -> None:
             self.ui_state.spin_idx = (self.ui_state.spin_idx + 1) % len(SPINNER)
             dbg = "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else ""
-            prompt.border_title = f"{SPINNER[self.ui_state.spin_idx]} {self.ui_state.spin_label}{dbg}"
+            prompt.border_title = (
+                f"{SPINNER[self.ui_state.spin_idx]} {self.ui_state.spin_label}{dbg}"
+            )
 
         timer = self.set_interval(0.08, _tick)
         self.tab_state.streaming_tabs.add(_my_tab_id)
@@ -65,6 +75,7 @@ class StreamingMixin(_MixinBase):
         prompt.placeholder = ""
 
         try:
+
             def _at_bottom() -> bool:
                 return msgs.scroll_y >= msgs.max_scroll_y - 3
 
@@ -73,12 +84,14 @@ class StreamingMixin(_MixinBase):
             async def on_thinking(content: str) -> None:
                 self.ui_state.spin_label = "思考中"
                 preview = content[:2000] + ("…" if len(content) > 2000 else "")
-                await msgs.mount(Collapsible(
-                    Static(preview, markup=False),
-                    title="💡 思考過程",
-                    collapsed=True,
-                    classes="thinking",
-                ))
+                await msgs.mount(
+                    Collapsible(
+                        Static(preview, markup=False),
+                        title="💡 思考過程",
+                        collapsed=True,
+                        classes="thinking",
+                    )
+                )
                 msgs.scroll_end(animate=False)
 
             async def on_token(chunk: str) -> None:
@@ -86,7 +99,13 @@ class StreamingMixin(_MixinBase):
                 self.ui_state.spin_label = "生成中"
                 buf.append(chunk)
                 if stream_msg is None:
-                    await msgs.mount(Static(f"🤖 {agent.display_name}", classes="ai-header", markup=False))
+                    await msgs.mount(
+                        Static(
+                            f"🤖 {agent.display_name}",
+                            classes="ai-header",
+                            markup=False,
+                        )
+                    )
                     stream_msg = AIMessage()
                     await msgs.mount(stream_msg)
                 now = asyncio.get_event_loop().time()
@@ -107,11 +126,19 @@ class StreamingMixin(_MixinBase):
                 if _hist and _hist[-1]["role"] == "assistant":
                     _display = str(_hist[-1]["content"])
                 else:
-                    _display = re.sub(r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=re.DOTALL).rstrip()
+                    _display = re.sub(
+                        r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=re.DOTALL
+                    ).rstrip()
                 if stream_msg:
                     await stream_msg.update_content(_display, final=True)
                 elif not buf:
-                    await msgs.mount(Static("🤖 [dim]（已完成，無文字回覆）[/dim]", markup=True, classes="ai-header"))
+                    await msgs.mount(
+                        Static(
+                            "🤖 [dim]（已完成，無文字回覆）[/dim]",
+                            markup=True,
+                            classes="ai-header",
+                        )
+                    )
                 parts: list[str] = []
                 if thinking_s:
                     parts.append(f"思考 {thinking_s:.1f}s")
@@ -138,8 +165,13 @@ class StreamingMixin(_MixinBase):
                 # TTS：整段回覆完成後在獨立執行緒播放，完全隔離 Textual event loop
                 _tts_cfg = getattr(agent, "tts_config", None)
                 if _tts_cfg and _display and not ephemeral:
-                    from core.tts import cancel_current as _tts_cancel, get_tts_loop, speak
+                    from core.tts import (
+                        cancel_current as _tts_cancel,
+                        get_tts_loop,
+                        speak,
+                    )
                     from loguru import logger as _log
+
                     _tts_cancel()  # 終止上一段語音（如正在播放）
                     # 同時取消排隊中但尚未開始的 future，避免多輪 tool call 造成 TTS 積壓
                     _prev = getattr(self, "_tts_future", None)
@@ -167,7 +199,9 @@ class StreamingMixin(_MixinBase):
                 nonlocal stream_msg, buf
                 self.ui_state.spin_label = "工具回應中"
                 if stream_msg and buf:
-                    _pre = re.sub(r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=re.DOTALL).rstrip()
+                    _pre = re.sub(
+                        r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=re.DOTALL
+                    ).rstrip()
                     await stream_msg.update_content(_pre, final=True)
                 stream_msg = None
                 buf.clear()
@@ -176,7 +210,13 @@ class StreamingMixin(_MixinBase):
                 result = tr.output
                 is_err = tr.is_error
                 is_warn = tr.is_warn
-                _FS_MUTATING = {"write_file", "create_directory", "move_file", "delete_file", "edit_file"}
+                _FS_MUTATING = {
+                    "write_file",
+                    "create_directory",
+                    "move_file",
+                    "delete_file",
+                    "edit_file",
+                }
                 if not is_err and not is_warn and name in _FS_MUTATING:
                     self.query_one("#file-tree", FileTree).refresh_tree()
                 icon = "❌" if is_err else ("⚠️" if is_warn else "🔧")
@@ -187,29 +227,38 @@ class StreamingMixin(_MixinBase):
                         if len(args_preview) > 300:
                             args_preview = args_preview[:300] + "…"
                         body = f"參數：{args_preview}\n\n{result[:600]}"
-                        await msgs.mount(Collapsible(
-                            Static(body, markup=False),
-                            title=f"{icon} {name}  [dim]工具錯誤[/dim]",
-                            collapsed=True,
-                            classes=card_class,
-                        ))
+                        await msgs.mount(
+                            Collapsible(
+                                Static(body, markup=False),
+                                title=f"{icon} {name}  [dim]工具錯誤[/dim]",
+                                collapsed=True,
+                                classes=card_class,
+                            )
+                        )
                         if _at_bottom():
                             msgs.scroll_end(animate=False)
                     return
                 args_str = json.dumps(args, ensure_ascii=False, indent=2)
                 cap = 1000
-                result_preview = result[:cap] + (f"\n…（共 {len(result)} 字元）" if len(result) > cap else "")
+                result_preview = result[:cap] + (
+                    f"\n…（共 {len(result)} 字元）" if len(result) > cap else ""
+                )
                 at_bot = _at_bottom()
                 from textual.containers import Vertical
-                await msgs.mount(Collapsible(
-                    Vertical(
-                        Markdown(f"**參數**\n```json\n{args_str}\n```"),
-                        Static(result_preview, markup=False, classes="tool-result-body"),
-                    ),
-                    title=f"{icon} {name}",
-                    collapsed=not is_err,
-                    classes=card_class,
-                ))
+
+                await msgs.mount(
+                    Collapsible(
+                        Vertical(
+                            Markdown(f"**參數**\n```json\n{args_str}\n```"),
+                            Static(
+                                result_preview, markup=False, classes="tool-result-body"
+                            ),
+                        ),
+                        title=f"{icon} {name}",
+                        collapsed=not is_err,
+                        classes=card_class,
+                    )
+                )
                 if at_bot:
                     msgs.scroll_end(animate=False)
 
@@ -235,19 +284,36 @@ class StreamingMixin(_MixinBase):
         except Exception as e:
             err_str = str(e).lower()
             _overflow_kws = (
-                "context", "too long", "window", "kv cache",
-                "resource_exhausted", "maximum context", "exceeds the maximum",
-                "token limit", "context length", "prompt is too long",
+                "context",
+                "too long",
+                "window",
+                "kv cache",
+                "resource_exhausted",
+                "maximum context",
+                "exceeds the maximum",
+                "token limit",
+                "context length",
+                "prompt is too long",
                 "reduce the length",
             )
-            if any(kw in err_str for kw in _overflow_kws) and (agent._gemini or agent._deepseek):
+            if any(kw in err_str for kw in _overflow_kws) and (
+                agent._gemini or agent._deepseek
+            ):
                 logger.warning(f"context overflow，啟動 autocompact：{e}")
                 try:
-                    await msgs.mount(Static("⚡ Context 已滿，正在用 Gemini 壓縮對話歷史…", classes="error-msg", markup=False))
+                    await msgs.mount(
+                        Static(
+                            "⚡ Context 已滿，正在用 Gemini 壓縮對話歷史…",
+                            classes="error-msg",
+                            markup=False,
+                        )
+                    )
                     msgs.scroll_end(animate=False)
                     await agent.compact_history()
                     logger.info("autocompact 完成，重試對話")
-                    await msgs.mount(Static("✅ 已壓縮，繼續對話", classes="error-msg", markup=False))
+                    await msgs.mount(
+                        Static("✅ 已壓縮，繼續對話", classes="error-msg", markup=False)
+                    )
                     msgs.scroll_end(animate=False)
                     stream_msg = None
                     buf.clear()
@@ -267,15 +333,27 @@ class StreamingMixin(_MixinBase):
                         await stream_msg.update_content("".join(buf), final=True)
                 except Exception as e2:
                     logger.exception("compact + retry error")
-                    await msgs.mount(Static(f"❌ 壓縮後仍失敗：{e2}", classes="error-msg", markup=False))
+                    await msgs.mount(
+                        Static(
+                            f"❌ 壓縮後仍失敗：{e2}", classes="error-msg", markup=False
+                        )
+                    )
                     msgs.scroll_end(animate=False)
             elif isinstance(e, TimeoutError):
                 logger.error(f"Ollama stream timeout：{e}")
-                await msgs.mount(Static(f"⏱ Ollama 無回應（逾時）：{e}", classes="error-msg", markup=False))
+                await msgs.mount(
+                    Static(
+                        f"⏱ Ollama 無回應（逾時）：{e}",
+                        classes="error-msg",
+                        markup=False,
+                    )
+                )
                 msgs.scroll_end(animate=False)
             else:
                 logger.exception("chat error")
-                await msgs.mount(Static(f"❌ 錯誤：{e}", classes="error-msg", markup=False))
+                await msgs.mount(
+                    Static(f"❌ 錯誤：{e}", classes="error-msg", markup=False)
+                )
                 msgs.scroll_end(animate=False)
 
         finally:
@@ -284,6 +362,7 @@ class StreamingMixin(_MixinBase):
             # 確認用戶目前是否還在這個 tab
             try:
                 from textual.widgets import TabbedContent as _TC2
+
                 _active_now = self.query_one("#center-tabs", _TC2).active or "chat"
             except Exception:
                 _active_now = _my_tab_id
@@ -307,7 +386,7 @@ class StreamingMixin(_MixinBase):
                 if self.input_state.restore_input:
                     self.input_state.restore_input = False
             if ephemeral and _history_snapshot is not None:
-                new_msgs = agent.history[len(_history_snapshot):]
+                new_msgs = agent.history[len(_history_snapshot) :]
                 self.input_state.last_ephemeral = new_msgs if new_msgs else None
                 agent.history = _history_snapshot
                 agent.save_history()

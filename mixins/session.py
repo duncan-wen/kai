@@ -1,4 +1,5 @@
 """SessionMixin — /nickname, /cd, /compact, /cls, /resume, /model 指令邏輯。"""
+
 from __future__ import annotations
 
 import os
@@ -10,7 +11,15 @@ from textual.widgets import Static
 
 from core.agent import Agent
 from core.session_store import SessionStore
-from core.config import _normalize, apply_kai_config, current_kai_config, ensure_kai_dir, get_nickname, load_kai_config, reload_env
+from core.config import (
+    _normalize,
+    apply_kai_config,
+    current_kai_config,
+    ensure_kai_dir,
+    get_nickname,
+    load_kai_config,
+    reload_env,
+)
 from core.models import REGISTRY
 from widgets.input import HistoryInput
 from widgets.sidebar import Sidebar
@@ -34,7 +43,11 @@ class SessionMixin(_MixinBase):
             self.notify(f"{model}\n.env key：{key}\n目前暱稱：{shown}", timeout=6)
             return
         env_path = Path(".env")
-        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        lines = (
+            env_path.read_text(encoding="utf-8").splitlines()
+            if env_path.exists()
+            else []
+        )
         replaced = False
         for i, line in enumerate(lines):
             if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
@@ -63,7 +76,11 @@ class SessionMixin(_MixinBase):
             self.agent.profile.num_ctx = int(cfg["num_ctx"])
         if "debug_tools" in cfg:
             v = cfg["debug_tools"]
-            self.ui_state.debug_tools = bool(v) if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
+            self.ui_state.debug_tools = (
+                bool(v)
+                if isinstance(v, bool)
+                else str(v).lower() in ("1", "true", "yes")
+            )
         if "model" in cfg and cfg["model"] != self.agent.profile.name:
             self.call_later(self.action_switch_model, cfg["model"])
 
@@ -71,6 +88,7 @@ class SessionMixin(_MixinBase):
         """開啟互動式 config 面板（選取 key 後按 L/G 匯出）。"""
         from widgets.config_screen import ConfigScreen
         from core.config import config_sources
+
         cfg = current_kai_config()
         await self.push_screen(ConfigScreen(cfg, config_sources()))
 
@@ -80,7 +98,9 @@ class SessionMixin(_MixinBase):
         self.notify("✅ .kai/config.json 已重新載入", severity="information", timeout=3)
 
     async def _do_cd(self, arg: str) -> None:
-        target = Path(self.session.prev_cwd if arg == "-" else arg).expanduser().resolve()
+        target = (
+            Path(self.session.prev_cwd if arg == "-" else arg).expanduser().resolve()
+        )
         if not target.is_dir():
             self.notify(f"目錄不存在：{target}", severity="error")
             return
@@ -100,10 +120,15 @@ class SessionMixin(_MixinBase):
 
     async def action_compact(self) -> None:
         if not self.agent._gemini and not self.agent._deepseek:
-            self.notify("需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能使用 compact", severity="warning")
+            self.notify(
+                "需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能使用 compact",
+                severity="warning",
+            )
             return
         msgs = self._active_msgs()
-        await msgs.mount(Static("⚡ 正在用 Gemini 壓縮對話歷史…", classes="error-msg", markup=False))
+        await msgs.mount(
+            Static("⚡ 正在用 Gemini 壓縮對話歷史…", classes="error-msg", markup=False)
+        )
         msgs.scroll_end(animate=False)
         try:
             await self.agent.compact_history()
@@ -177,6 +202,7 @@ class SessionMixin(_MixinBase):
 
     async def _handle_resume(self, arg: str) -> None:
         from widgets.resume import ResumeScreen
+
         store = self._session_store()
         entries = store.list_archives()
         if not entries:

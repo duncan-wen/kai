@@ -5,6 +5,7 @@
 2. 漏判：工具拋例外必須標記 is_error。
 3. 不一致：streaming 與 agents 兩條路徑共用同一組旗標語意。
 """
+
 import asyncio
 import json
 
@@ -26,6 +27,7 @@ class _FakeTC:
 
 
 # ---------- ToolResult 語意 ----------
+
 
 def test_tool_result_str_returns_output():
     tr = ToolResult("bash_exec", "hello")
@@ -52,6 +54,7 @@ def test_exit_code_2_is_error():
 
 # ---------- bash_exec 回傳結構化結果 ----------
 
+
 def test_bash_success_is_structured():
     tr = asyncio.run(bash_exec("echo hi"))
     assert isinstance(tr, ToolResult)
@@ -75,9 +78,12 @@ def test_bash_exit_2_is_error():
 
 # ---------- 回歸：不再用字串關鍵字誤判 ----------
 
+
 def test_success_output_containing_traceback_is_not_error():
     """工具成功，但輸出含 Traceback 字樣（如 codegraph 回傳原始碼）→ 不得塗紅。"""
-    tr = asyncio.run(bash_exec("printf 'Traceback (most recent call last):\\n  fake snippet\\n'"))
+    tr = asyncio.run(
+        bash_exec("printf 'Traceback (most recent call last):\\n  fake snippet\\n'")
+    )
     assert tr.exit_code == 0
     assert tr.is_error is False, "成功的輸出含 Traceback 字樣不應被判為錯誤"
 
@@ -94,6 +100,7 @@ def test_failure_without_keywords_is_error():
 
 
 # ---------- dispatch 層 ----------
+
 
 def test_dispatch_unknown_tool_is_error():
     tr = asyncio.run(_dispatch("nope", {}, {}, None))
@@ -130,6 +137,7 @@ def test_dispatch_wraps_plain_string_tool():
 
 
 # ---------- run_tool 完整路徑 ----------
+
 
 def test_run_tool_returns_tool_result():
     tc = _FakeTC("echo_tool", {"text": "yo"})

@@ -1,4 +1,5 @@
 """core.skills — 掃描器（階段 0）：雙層掃描、frontmatter 解析、覆蓋與安全 fallback。"""
+
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,11 @@ def test_empty_when_no_dirs(dirs):
 
 def test_parse_frontmatter(dirs):
     local, _ = dirs
-    _write(local, "pdf-summarizer",
-           "name: pdf-summarizer\ndescription: 從 PDF 抽取文字\nwhen_to_use: 處理 PDF 時")
+    _write(
+        local,
+        "pdf-summarizer",
+        "name: pdf-summarizer\ndescription: 從 PDF 抽取文字\nwhen_to_use: 處理 PDF 時",
+    )
     result = skills.discover_skills()
     assert len(result) == 1
     s = result[0]
@@ -86,12 +90,14 @@ def test_load_skill(dirs):
 
 # ── 階段 3：scripts/ 捆綁 + create_skill ──────────────────────────────
 
+
 def test_scripts_bundled_are_listed(dirs):
     local, _ = dirs
     p = local / "pdf-tool"
     (p / "scripts").mkdir(parents=True)
     (p / "SKILL.md").write_text(
-        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8")
+        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8"
+    )
     (p / "scripts" / "extract.py").write_text("print('hi')\n", encoding="utf-8")
     (p / "scripts" / "cleanup.sh").write_text("echo hi\n", encoding="utf-8")
     s = skills.discover_skills()[0]
@@ -108,11 +114,13 @@ def test_no_scripts_dir_means_empty(dirs):
 def test_use_skill_includes_scripts_and_hint(dirs):
     import asyncio
     from core.tools.skills import use_skill
+
     local, _ = dirs
     p = local / "pdf-tool"
     (p / "scripts").mkdir(parents=True)
     (p / "SKILL.md").write_text(
-        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8")
+        "---\nname: pdf-tool\ndescription: 處理 PDF\n---\n# 步驟\n", encoding="utf-8"
+    )
     (p / "scripts" / "extract.py").write_text("print('hi')\n", encoding="utf-8")
     out = asyncio.run(use_skill("pdf-tool"))
     assert "捆綁腳本" in out
@@ -133,7 +141,8 @@ def test_create_skill_local(dirs):
 def test_create_skill_global(dirs):
     _, global_ = dirs
     s = skills.create_skill(
-        "g-skill", "全域", "# body", when_to_use="需要時", global_scope=True)
+        "g-skill", "全域", "# body", when_to_use="需要時", global_scope=True
+    )
     assert s.name == "g-skill"
     assert s.when_to_use == "需要時"
     assert (global_ / "g-skill" / "SKILL.md").is_file()

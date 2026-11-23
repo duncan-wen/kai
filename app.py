@@ -1,4 +1,5 @@
 """Textual TUI for kai.  Run: uv run python app.py"""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +43,14 @@ from mixins.skills import SkillsMixin
 from mixins.session import SessionMixin
 from mixins.streaming import StreamingMixin
 from textual_fspicker import FileOpen, Filters, SelectDirectory
-from widgets.chat import AIMessage, CapabilityBadge, CapLabel, ConfirmCloseScreen, FileViewer, ImageBubble
+from widgets.chat import (
+    AIMessage,
+    CapabilityBadge,
+    CapLabel,
+    ConfirmCloseScreen,
+    FileViewer,
+    ImageBubble,
+)
 from widgets.commands import ChatCommands
 from widgets.input import ChatAutoComplete, HistoryInput
 from widgets.sidebar import ResizeHandle, Sidebar
@@ -117,14 +125,24 @@ async def _fetch_db_schema(mcp: MCPClient) -> str:
 
 class AgentMessage(Message):
     """agent 之間透過 send_to_agent 傳遞的訊息（雙向）。"""
+
     def __init__(self, sender: str, target: str, content: str) -> None:
         super().__init__()
         self.sender = sender
-        self.target = target   # "main" / "chat" 或 agent 暱稱
+        self.target = target  # "main" / "chat" 或 agent 暱稱
         self.content = content
 
 
-class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, BashMixin, StreamingMixin, App[None]):
+class ChatApp(
+    MCPMixin,
+    SkillsMixin,
+    AgentsMixin,
+    AppToolsMixin,
+    SessionMixin,
+    BashMixin,
+    StreamingMixin,
+    App[None],
+):
     CSS_PATH = "app.tcss"
     COMMANDS = App.COMMANDS | {ChatCommands}
 
@@ -135,8 +153,12 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         Binding("ctrl+t", "toggle_file_tree", "檔案樹"),
         Binding("ctrl+b", "toggle_sidebar", "側邊欄"),
         Binding("ctrl+w", "close_tab", "關閉標籤", priority=True),
-        Binding("ctrl+shift+left",  "move_tab_left",  "Tab 左移", priority=True, show=False),
-        Binding("ctrl+shift+right", "move_tab_right", "Tab 右移", priority=True, show=False),
+        Binding(
+            "ctrl+shift+left", "move_tab_left", "Tab 左移", priority=True, show=False
+        ),
+        Binding(
+            "ctrl+shift+right", "move_tab_right", "Tab 右移", priority=True, show=False
+        ),
         Binding("escape", "cancel_stream", "取消", priority=True),
     ]
 
@@ -148,6 +170,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         # Tooltip 掛在 Screen._tooltips 層，累積多了會干擾佈局。直接 patch 成 no-op。
         try:
             from textual.widgets._markdown import MarkdownTableCellContents
+
             MarkdownTableCellContents.with_tooltip = lambda self, *a, **kw: self  # noqa: ARG005
         except Exception:
             pass
@@ -155,7 +178,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         self.agents = AgentRegistry(Agent(model=_kai_cfg.MODEL))
         self._inject_app_tools(self.agent)
         self.scroll_sensitivity_y = 5.0
-        self._at_mention_re = re.compile(r'(?:(?<=\s)|^)@(\S+)')
+        self._at_mention_re = re.compile(r"(?:(?<=\s)|^)@(\S+)")
         self._mcp_task: asyncio.Task | None = None
         self._mcp_done: asyncio.Event | None = None
         self._open_file_tabs: dict[str, Path] = {}
@@ -204,6 +227,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
 
         async def _open_agent_tool(query: str) -> str:
             from core.agent_factory import find_agent, list_agents
+
             dir_name = find_agent(query)
             if not dir_name:
                 agents = list_agents()
@@ -235,7 +259,10 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             ("/cd", "切換工作目錄  /cd <路徑>"),
             ("/mcp-list", "列出所有 MCP server 與工具說明"),
             ("/mcp-reload", "重新載入 MCP servers（不需重啟）"),
-            ("/mcp-add", "新增 MCP server  /mcp-add <name> <cmd> [args...]  或  /mcp-add <name> --url <url>"),
+            (
+                "/mcp-add",
+                "新增 MCP server  /mcp-add <name> <cmd> [args...]  或  /mcp-add <name> --url <url>",
+            ),
             ("/mcp-del", "移除 MCP server  /mcp-del <name>"),
             ("/skills", "列出所有可用 skill 與觸發時機"),
             ("/rename", "命名目前 session  /rename <名稱>"),
@@ -243,12 +270,21 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             ("/create-agent", "用 AI 設計新 agent  /create-agent [--global] <描述>"),
             ("/load-agent", "載入 agent 設定  /load-agent <name> [name2 ...]"),
             ("/list-agents", "列出所有已建立的 agents"),
-            ("/reload-agent", "重新載入目前 agent 的 config.json（system prompt 熱更新）"),
+            (
+                "/reload-agent",
+                "重新載入目前 agent 的 config.json（system prompt 熱更新）",
+            ),
             ("/delete-agent", "刪除 agent  /delete-agent [name]（省略 name 開面板選）"),
-            ("/close-agent", "關閉 agent tab  /close-agent [name]（省略 name 關目前 tab）"),
+            (
+                "/close-agent",
+                "關閉 agent tab  /close-agent [name]（省略 name 關目前 tab）",
+            ),
             ("/reload-config", "重新載入 .kai/config.json 並套用所有設定"),
             ("/init-config", "互動式 config 面板：選取 key，L→local G→global 匯出"),
-            ("/tts", "切換 TTS 引擎  /tts <edge-tts|azure-tts|melotts|kokoro-api|kokoro|off>"),
+            (
+                "/tts",
+                "切換 TTS 引擎  /tts <edge-tts|azure-tts|melotts|kokoro-api|kokoro|off>",
+            ),
             ("/tts edge-tts", "切換 TTS 為 edge-tts（雲端）"),
             ("/tts azure-tts", "切換 TTS 為 Azure Cognitive Services TTS"),
             ("/tts melotts", "切換 TTS 為 melotts（Docker 8886）"),
@@ -292,21 +328,28 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 inbox_sender = msg.get("_inbox_sender")
                 if inbox_sender and text:
                     from textual.widgets import Collapsible
+
                     preview = text[:300] + ("…" if len(text) > 300 else "")
-                    widgets.append(Collapsible(
-                        Static(preview, markup=False),
-                        title=f"📨 來自 {inbox_sender}",
-                        collapsed=True,
-                        classes="inbox-bubble",
-                    ))
+                    widgets.append(
+                        Collapsible(
+                            Static(preview, markup=False),
+                            title=f"📨 來自 {inbox_sender}",
+                            collapsed=True,
+                            classes="inbox-bubble",
+                        )
+                    )
                 elif text:
-                    widgets.append(Static(
-                        f"[bold]{USERNAME}[/bold]\n{text}",
-                        markup=True,
-                        classes="user-bubble",
-                    ))
+                    widgets.append(
+                        Static(
+                            f"[bold]{USERNAME}[/bold]\n{text}",
+                            markup=True,
+                            classes="user-bubble",
+                        )
+                    )
             elif role == "assistant" and content:
-                widgets.append(Static(f"🤖 {nickname}", classes="ai-header", markup=False))
+                widgets.append(
+                    Static(f"🤖 {nickname}", classes="ai-header", markup=False)
+                )
                 ai_msg = AIMessage()
                 widgets.append(ai_msg)
                 ai_updates.append((ai_msg, content))
@@ -368,6 +411,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         # 只有串流進行中才需要在退出時存檔；正常情況 agent.chat 已在每輪末尾呼叫 save_history，
         # 若無條件存檔會覆蓋使用者對 history.json 的手動編輯。
         from widgets.input import HistoryInput
+
         prompt = self.query_one("#prompt", HistoryInput)
         if prompt.has_class("streaming"):
             hist = self.agent.history
@@ -381,6 +425,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 pass
         # 退出前 flush Langfuse 待上傳的 span，避免 TUI 關閉掉資料
         from core.langfuse_client import flush
+
         flush()
         self.exit()
 
@@ -397,9 +442,13 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             return
         if self.input_state.history_idx == -1:
             self.input_state.history_draft = prompt.value
-        self.input_state.history_idx = min(self.input_state.history_idx + 1, len(self.input_state.history) - 1)
+        self.input_state.history_idx = min(
+            self.input_state.history_idx + 1, len(self.input_state.history) - 1
+        )
         _hval = self.input_state.history[-(self.input_state.history_idx + 1)]
-        if (len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval) and not prompt._is_marker(_hval):
+        if (
+            len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval
+        ) and not prompt._is_marker(_hval):
             prompt._compress(_hval)
         else:
             prompt.value = _hval
@@ -420,7 +469,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             prompt.cursor_position = len(prompt.value)
         else:
             _hval = self.input_state.history[-(self.input_state.history_idx + 1)]
-            if (len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval) and not prompt._is_marker(_hval):
+            if (
+                len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval
+            ) and not prompt._is_marker(_hval):
                 prompt._compress(_hval)
             else:
                 prompt.value = _hval
@@ -430,18 +481,51 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
     async def _on_attach_clicked(self, event: events.Click) -> None:
         event.stop()
         from textual_fspicker import FileOpen, Filters
+
         _filters = Filters(
-            ("圖片", lambda p: p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}),
-            ("文字", lambda p: p.suffix.lower() in {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ts", ".js", ".html", ".css"}),
+            (
+                "圖片",
+                lambda p: (
+                    p.suffix.lower()
+                    in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+                ),
+            ),
+            (
+                "文字",
+                lambda p: (
+                    p.suffix.lower()
+                    in {
+                        ".py",
+                        ".md",
+                        ".txt",
+                        ".json",
+                        ".yaml",
+                        ".yml",
+                        ".toml",
+                        ".ts",
+                        ".js",
+                        ".html",
+                        ".css",
+                    }
+                ),
+            ),
             ("所有檔案", lambda p: True),
         )
 
         async def _on_attach(path) -> None:
             if path:
                 from pathlib import Path as _Path
+
                 p = _Path(path)
                 prompt = self.query_one("#prompt", HistoryInput)
-                if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}:
+                if p.suffix.lower() in {
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".webp",
+                    ".bmp",
+                }:
                     prompt.value = f"/image {p} "
                 else:
                     cur = prompt.value
@@ -527,9 +611,15 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                     notes_root = self.agent._agent_dir or Path(os.getcwd()) / ".kai"
                     notes_root.mkdir(parents=True, exist_ok=True)
                     notes_path = notes_root / "notes.md"
-                    existing = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
+                    existing = (
+                        notes_path.read_text(encoding="utf-8")
+                        if notes_path.exists()
+                        else ""
+                    )
                     if f"- {arg}" in existing:
-                        self.notify("已存在相同記錄，略過", severity="warning", timeout=3)
+                        self.notify(
+                            "已存在相同記錄，略過", severity="warning", timeout=3
+                        )
                     else:
                         with open(notes_path, "a", encoding="utf-8") as _f:
                             _f.write(f"\n- {arg}")
@@ -556,12 +646,14 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                     except Exception as e:
                         self.notify(f"切換失敗：{e}", severity="error")
                 else:
+
                     async def _on_dir_selected(path: Path | None) -> None:
                         if path:
                             try:
                                 await self._do_cd(str(path))
                             except Exception as e:
                                 self.notify(f"切換失敗：{e}", severity="error")
+
                     self.push_screen(
                         SelectDirectory(os.getcwd(), title="切換目錄"),
                         callback=_on_dir_selected,
@@ -587,7 +679,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                     self._do_create_agent(arg)
             elif cmd == "/load-agent":
                 if not arg:
-                    self.notify("用法：/load-agent <name> [name2 ...]", severity="warning")
+                    self.notify(
+                        "用法：/load-agent <name> [name2 ...]", severity="warning"
+                    )
                 else:
                     for _ag_name in arg.split():
                         await self._do_load_agent(_ag_name)
@@ -610,15 +704,28 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                     )
                 elif not arg:
                     _img_filters = Filters(
-                        ("圖片", lambda p: p.suffix.lower() in {
-                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
-                        }),
+                        (
+                            "圖片",
+                            lambda p: (
+                                p.suffix.lower()
+                                in {
+                                    ".png",
+                                    ".jpg",
+                                    ".jpeg",
+                                    ".gif",
+                                    ".webp",
+                                    ".bmp",
+                                }
+                            ),
+                        ),
                     )
+
                     async def _on_image_selected(path: Path | None) -> None:
                         if path:
                             prompt.value = f"/image {path} "
                             prompt.cursor_position = len(prompt.value)
                             prompt.focus()
+
                     self.push_screen(
                         FileOpen(os.getcwd(), title="選擇圖片", filters=_img_filters),
                         callback=_on_image_selected,
@@ -642,19 +749,23 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             elif cmd == "/greeting":
                 val = arg.strip().lower()
                 if val in ("on", "off"):
-                    self.ui_state.greeting_enabled = (val == "on")
+                    self.ui_state.greeting_enabled = val == "on"
                     label = "開啟" if self.ui_state.greeting_enabled else "關閉"
                     self.notify(f"Greeting：{label}", severity="information", timeout=3)
                 else:
                     state = "開啟" if self.ui_state.greeting_enabled else "關閉"
-                    self.notify(f"用法：/greeting on|off（目前：{state}）", severity="warning")
+                    self.notify(
+                        f"用法：/greeting on|off（目前：{state}）", severity="warning"
+                    )
             else:
                 self.notify(f"未知指令：{cmd}", severity="warning")
             return
 
         msgs = self._active_msgs()
         await msgs.mount(
-            Static(f"[bold]{USERNAME}[/bold]\n{text}", markup=True, classes="user-bubble")
+            Static(
+                f"[bold]{USERNAME}[/bold]\n{text}", markup=True, classes="user-bubble"
+            )
         )
         msgs.scroll_end(animate=False)
 
@@ -671,26 +782,60 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
-    _AT_SKIP_DIRS = frozenset({
-        ".git", ".venv", "venv", "env", "__pycache__",
-        ".mypy_cache", ".ruff_cache", ".pytest_cache",
-        "dist", "build", ".next", ".nuxt",
-        "node_modules", ".idea", ".vscode",
-    })
-    _AT_SKIP_SUFFIXES = frozenset({
-        ".pyc", ".pyo", ".so", ".dll", ".exe",
-        ".o", ".a", ".lib", ".obj",
-    })
-    _AT_IMAGE_SUFFIXES = frozenset({
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".svg",
-    })
+    _AT_SKIP_DIRS = frozenset(
+        {
+            ".git",
+            ".venv",
+            "venv",
+            "env",
+            "__pycache__",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".pytest_cache",
+            "dist",
+            "build",
+            ".next",
+            ".nuxt",
+            "node_modules",
+            ".idea",
+            ".vscode",
+        }
+    )
+    _AT_SKIP_SUFFIXES = frozenset(
+        {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".o",
+            ".a",
+            ".lib",
+            ".obj",
+        }
+    )
+    _AT_IMAGE_SUFFIXES = frozenset(
+        {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".ico",
+            ".tiff",
+            ".svg",
+        }
+    )
 
     def _dir_tree(self, root: Path, prefix: str = "", depth: int = 0) -> list[str]:
         if depth > 4:
             return [prefix + "…"]
         lines: list[str] = []
         try:
-            entries = sorted(root.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
+            entries = sorted(
+                root.iterdir(), key=lambda e: (e.is_file(), e.name.lower())
+            )
         except PermissionError:
             return [prefix + "(permission denied)"]
         for entry in entries:
@@ -701,7 +846,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             if entry.is_file() and entry.suffix.lower() in self._AT_SKIP_SUFFIXES:
                 continue
             connector = "├── " if entry != entries[-1] else "└── "
-            lines.append(prefix + connector + entry.name + ("/" if entry.is_dir() else ""))
+            lines.append(
+                prefix + connector + entry.name + ("/" if entry.is_dir() else "")
+            )
             if entry.is_dir():
                 ext = "│   " if entry != entries[-1] else "    "
                 lines.extend(self._dir_tree(entry, prefix + ext, depth + 1))
@@ -720,9 +867,15 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 seen.add(str(p))
                 if p.is_file():
                     if p.suffix.lower() in self._AT_IMAGE_SUFFIXES:
-                        self.notify(f"@{p.name} 是圖片，請改用 /image 指令", severity="warning", timeout=3)
+                        self.notify(
+                            f"@{p.name} 是圖片，請改用 /image 指令",
+                            severity="warning",
+                            timeout=3,
+                        )
                         continue
-                    files.append((str(p), p.read_text(encoding="utf-8", errors="replace")))
+                    files.append(
+                        (str(p), p.read_text(encoding="utf-8", errors="replace"))
+                    )
                 elif p.is_dir():
                     tree_lines = [p.name + "/"] + self._dir_tree(p)
                     files.append((str(p), "[目錄結構]\n" + "\n".join(tree_lines)))
@@ -741,23 +894,28 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         if not engine:
             cfg = getattr(self.agent, "tts_config", None)
             if cfg:
-                self.notify(f"TTS 目前：{cfg.get('engine', 'edge-tts')}  voice={cfg.get('voice', '—')}", timeout=4)
+                self.notify(
+                    f"TTS 目前：{cfg.get('engine', 'edge-tts')}  voice={cfg.get('voice', '—')}",
+                    timeout=4,
+                )
             else:
                 self.notify("TTS 已關閉（此 agent 無 tts 設定）", timeout=3)
             return
         if engine not in _ENGINES:
-            self.notify(f"未知引擎：{engine}  可用：{', '.join(_ENGINES)}", severity="warning")
+            self.notify(
+                f"未知引擎：{engine}  可用：{', '.join(_ENGINES)}", severity="warning"
+            )
             return
         if engine == "off":
             self.agent.tts_config = None
             self.notify("TTS 已關閉", timeout=3)
             return
         _defaults: dict[str, dict] = {
-            "kokoro":     {"voice": "af_sky",                 "lang": "en-us"},
-            "kokoro-api": {"voice": "af_bella",               "lang": "en-us", "port": 8885},
-            "melotts":    {"voice": "EN-US",                  "lang": "en",    "port": 8886},
-            "edge-tts":   {"voice": "en-US-AriaNeural",       "lang": "en-us"},
-            "azure-tts":  {"voice": "zh-TW-HsiaoChenNeural",  "lang": "zh-TW"},
+            "kokoro": {"voice": "af_sky", "lang": "en-us"},
+            "kokoro-api": {"voice": "af_bella", "lang": "en-us", "port": 8885},
+            "melotts": {"voice": "EN-US", "lang": "en", "port": 8886},
+            "edge-tts": {"voice": "en-US-AriaNeural", "lang": "en-us"},
+            "azure-tts": {"voice": "zh-TW-HsiaoChenNeural", "lang": "zh-TW"},
         }
         cfg = dict(getattr(self.agent, "tts_config", None) or {})
         cfg.update({"engine": engine, **_defaults[engine]})
@@ -808,12 +966,14 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         wid = widget.id or "" if widget else ""
         if not wid.startswith("--content-tab-") or wid == "--content-tab-chat":
             return
-        tab_id = wid[len("--content-tab-"):]
+        tab_id = wid[len("--content-tab-") :]
         if event.screen_x >= region.x + region.width - 2:
             event.stop()
             await self._maybe_close_tab(tab_id)
 
-    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
         """切換到 agent tab（或 chat tab）時把它設為作用中的 Agent。
 
         讀 tc.active 而不是 event.pane.id：晚到的過時事件也只會套用畫面上真正的 tab。
@@ -848,7 +1008,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         prompt = self.query_one("#prompt", HistoryInput)
         prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
         sidebar.set_model(self.agent.profile.name)
-        sidebar.set_mcp(self.agent.mcp_client.server_summary if self.agent.mcp_client else {})
+        sidebar.set_mcp(
+            self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
+        )
         self._refresh_skills_sidebar()
         self._update_subtitle()
         self._sync_cap_bar()
@@ -886,6 +1048,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             self.notify(f"無法讀取 {path.name}：{e}", severity="error")
             return
         from widgets.utils import _SUFFIX_TO_LANG
+
         lang = _SUFFIX_TO_LANG.get(path.suffix.lower())
         ta = FileViewer(
             content,
@@ -902,6 +1065,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         """將目前 active tab 往左（-1）或右（+1）移動一格，Chat tab 不可移動。"""
         from textual.widgets._content_switcher import ContentSwitcher
         from textual.widgets._tabbed_content import ContentTab, ContentTabs
+
         tc = self.query_one("#center-tabs", TabbedContent)
         active_id = tc.active
         if not active_id or active_id == "chat":
@@ -910,7 +1074,14 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             content_tabs = tc.get_child_by_type(ContentTabs)
             tabs_list = content_tabs.query_one("#tabs-list")
             tabs = list(tabs_list.query("Tab").results())
-            cur = next((i for i, t in enumerate(tabs) if t.id == ContentTab.add_prefix(active_id)), None)
+            cur = next(
+                (
+                    i
+                    for i, t in enumerate(tabs)
+                    if t.id == ContentTab.add_prefix(active_id)
+                ),
+                None,
+            )
             if cur is None:
                 return
             tgt = cur + direction
@@ -959,7 +1130,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
                 def _on_confirm(confirmed: bool | None) -> None:
                     if confirmed:
                         self._open_file_tabs.pop(tab_id, None)
-                        self.query_one("#center-tabs", TabbedContent).remove_pane(tab_id)
+                        self.query_one("#center-tabs", TabbedContent).remove_pane(
+                            tab_id
+                        )
 
                 self.push_screen(ConfirmCloseScreen(fname), callback=_on_confirm)
                 return  # 等 callback 決定是否關閉
@@ -981,7 +1154,9 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
         if tab_id == AgentRegistry.MAIN_ID:
             return self.query_one("#messages", VerticalScroll)
         try:
-            return self.query_one(f"TabPane#{tab_id}", TabPane).query_one(VerticalScroll)
+            return self.query_one(f"TabPane#{tab_id}", TabPane).query_one(
+                VerticalScroll
+            )
         except Exception:
             return self.query_one("#messages", VerticalScroll)
 
@@ -993,6 +1168,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
     def action_cancel_stream(self) -> None:
         from textual.screen import ModalScreen
         from widgets.input import ChatAutoComplete, HistoryInput
+
         if isinstance(self.screen, ModalScreen):
             self.screen.dismiss()
             return
@@ -1016,6 +1192,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
             # 未串流：清除樹多選 or 聚焦輸入框
             try:
                 from widgets.tree import FileTree
+
                 ft = self.query_one("#file-tree", FileTree)
                 if ft._multi_selected:
                     ft.clear_multi_select()
@@ -1027,6 +1204,7 @@ class ChatApp(MCPMixin, SkillsMixin, AgentsMixin, AppToolsMixin, SessionMixin, B
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="kai — terminal AI agent TUI")
     parser.add_argument("directory", nargs="?", help="啟動目錄（預設為當前目錄）")
     args = parser.parse_args()

@@ -1,4 +1,5 @@
 """ConfigScreen — 互動式 config 面板：選取 key 後匯出到 local / global。"""
+
 from __future__ import annotations
 
 import json
@@ -16,12 +17,11 @@ _KEY_META: list[tuple[str, str, str]] = [
     (e.key, e.unit, e.desc) for e in _CFG_REGISTRY if not e.api_key
 ]
 
-_API_KEY_HINT = (
-    "API 金鑰請設定在 .env：\n  "
-    + "    ".join(f"{e.env}=..." for e in _CFG_REGISTRY if e.api_key)
+_API_KEY_HINT = "API 金鑰請設定在 .env：\n  " + "    ".join(
+    f"{e.env}=..." for e in _CFG_REGISTRY if e.api_key
 )
 
-_CHECKED   = "[green]✓[/green]"
+_CHECKED = "[green]✓[/green]"
 _UNCHECKED = "[dim]○[/dim]"
 
 
@@ -29,11 +29,11 @@ class ConfigScreen(ModalScreen[None]):
     """互動式 config 面板：Space 選取，L 匯出 local，G 匯出 global。"""
 
     BINDINGS = [
-        Binding("escape,q", "dismiss",       show=False),
-        Binding("space",    "toggle_row",    "選取/取消", show=True),
-        Binding("a",        "toggle_all",    "全選/全不選", show=True),
-        Binding("l",        "export_local",  "→ local",  show=True),
-        Binding("g",        "export_global", "→ global", show=True),
+        Binding("escape,q", "dismiss", show=False),
+        Binding("space", "toggle_row", "選取/取消", show=True),
+        Binding("a", "toggle_all", "全選/全不選", show=True),
+        Binding("l", "export_local", "→ local", show=True),
+        Binding("g", "export_global", "→ global", show=True),
     ]
 
     DEFAULT_CSS = """
@@ -89,11 +89,16 @@ class ConfigScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         dt = self.query_one("#config-table", DataTable)
-        (self._col_check, *_) = dt.add_columns("", "key", "目前傀", "單位", "來源", "說明")
+        (self._col_check, *_) = dt.add_columns(
+            "", "key", "目前傀", "單位", "來源", "說明"
+        )
         for key, unit, desc in _KEY_META:
             val = self._values.get(key, "—")
             src = self._sources.get(key, ".env")
-            src_label = {"local": "[green]local[/green]", "global": "[yellow]global[/yellow]"}.get(src, "[dim].env[/dim]")
+            src_label = {
+                "local": "[green]local[/green]",
+                "global": "[yellow]global[/yellow]",
+            }.get(src, "[dim].env[/dim]")
             dt.add_row(self._mark(key), key, str(val), unit, src_label, desc, key=key)
         dt.focus()
 
@@ -136,7 +141,9 @@ class ConfigScreen(ModalScreen[None]):
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.notify(f"✅ 已寫入 {label}（{len(cfg)} 個 key）", severity="information", timeout=4)
+        self.notify(
+            f"✅ 已寫入 {label}（{len(cfg)} 個 key）", severity="information", timeout=4
+        )
 
     def action_export_local(self) -> None:
         self._export(Path(".kai") / "config.json", "cwd/.kai/config.json")

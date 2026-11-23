@@ -1,4 +1,5 @@
 """Chat display widgets: ImageBubble, FileViewer, CopyButton, CapabilityBadge, CapLabel, AIMessage, ConfirmCloseScreen."""
+
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +44,9 @@ class ConfirmCloseScreen(ModalScreen[bool]):
                 markup=True,
                 classes="confirm-title",
             )
-            yield Static("關閉後修改將遺失，確定要關閉嗎？", markup=False, classes="confirm-body")
+            yield Static(
+                "關閉後修改將遺失，確定要關閉嗎？", markup=False, classes="confirm-body"
+            )
             with Horizontal(classes="confirm-buttons"):
                 yield Button("取消", variant="default", id="btn-cancel")
                 yield Button("關閉（不存檔）", variant="error", id="btn-close")
@@ -218,6 +221,7 @@ class MermaidButton(Static):
     async def on_click(self, event: events.Click) -> None:
         event.stop()
         from widgets.utils import _mermaid_url, _open_url
+
         url = _mermaid_url(self._code)
         await asyncio.to_thread(_open_url, url)
         self.app.notify("已開啟 mermaid.live", timeout=2)
@@ -266,8 +270,8 @@ class AIMessage(Widget):
     _raw: str = ""
 
     def compose(self) -> ComposeResult:
-        yield Static("", classes="stream-view", markup=False)   # 串流期間顯示
-        yield Markdown("", classes="md-view")      # 完成後顯示
+        yield Static("", classes="stream-view", markup=False)  # 串流期間顯示
+        yield Markdown("", classes="md-view")  # 完成後顯示
         yield TextArea(
             "",
             read_only=True,
@@ -310,8 +314,12 @@ class AIMessage(Widget):
                 continue
             if not fence.code:
                 continue
-            lexer = (getattr(fence, "_lexer", "") or getattr(fence, "language", "")).lower()
-            is_mermaid = lexer == "mermaid" or bool(_MERMAID_RE.match(fence.code.strip()))
+            lexer = (
+                getattr(fence, "_lexer", "") or getattr(fence, "language", "")
+            ).lower()
+            is_mermaid = lexer == "mermaid" or bool(
+                _MERMAID_RE.match(fence.code.strip())
+            )
             if is_mermaid:
                 await fence.mount(
                     Horizontal(

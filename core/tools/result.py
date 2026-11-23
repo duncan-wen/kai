@@ -10,6 +10,7 @@
 
 改由分發層與工具本身直接標記 `is_error` / `exit_code`，顯示層只讀 flag。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,5 @@
 """AgentsMixin — /create-agent, /load-agent, /list-agents 指令邏輯。"""
+
 from __future__ import annotations
 
 from textual import work
@@ -41,10 +42,14 @@ class AgentsMixin(_MixinBase):
         def _tick() -> None:
             nonlocal _spin_idx
             _spin_idx = (_spin_idx + 1) % len(SPINNER)
-            prompt.border_title = f"{SPINNER[_spin_idx]} 設計 agent 中（{design_model}）…"
+            prompt.border_title = (
+                f"{SPINNER[_spin_idx]} 設計 agent 中（{design_model}）…"
+            )
 
         timer = self.set_interval(0.08, _tick)
-        await msgs.mount(Static(f"🏭 設計中：{description}", markup=False, classes="bash-output"))
+        await msgs.mount(
+            Static(f"🏭 設計中：{description}", markup=False, classes="bash-output")
+        )
         msgs.scroll_end(animate=False)
         try:
             data = await call_full_design(description)
@@ -53,13 +58,18 @@ class AgentsMixin(_MixinBase):
                 self.notify(f"LLM 回覆缺少欄位：{missing}", severity="error")
                 return
             adir = save_agent(data, global_scope=global_scope)
-            scope_label = f"~/.kai/agents/{adir.name}" if global_scope else f"agents/{adir.name}"
-            await msgs.mount(Static(
-                f"✅ Agent 已建立：{data['name']}（{scope_label}）\n"
-                f"   model: {data['model']}  nickname: {data.get('nickname', '—')}\n"
-                f"   輸入 /load-agent {adir.name} 載入",
-                markup=False, classes="bash-output",
-            ))
+            scope_label = (
+                f"~/.kai/agents/{adir.name}" if global_scope else f"agents/{adir.name}"
+            )
+            await msgs.mount(
+                Static(
+                    f"✅ Agent 已建立：{data['name']}（{scope_label}）\n"
+                    f"   model: {data['model']}  nickname: {data.get('nickname', '—')}\n"
+                    f"   輸入 /load-agent {adir.name} 載入",
+                    markup=False,
+                    classes="bash-output",
+                )
+            )
             msgs.scroll_end(animate=False)
             self.query_one("#file-tree", FileTree).refresh_tree()
         except Exception as e:
@@ -81,6 +91,7 @@ class AgentsMixin(_MixinBase):
 
     async def _do_load_agent(self, name: str) -> None:
         from core.agent_factory import find_agent, load_agent
+
         # scope 前綴（來自 AgentsScreen）直接傳入；否則做模糊比對
         if name.startswith(("local:", "global:")):
             resolved = name
@@ -134,6 +145,7 @@ class AgentsMixin(_MixinBase):
 
         # target 通常是 send_to_agent 給的 tab id；其他來源則依名稱查找
         from core.agent_registry import AgentRegistry
+
         target_tab_id = target if self.agents.get(target) is not None else ""
         if not target_tab_id:
             try:
@@ -159,6 +171,7 @@ class AgentsMixin(_MixinBase):
         prompt = self.query_one("#prompt", HistoryInput)
         try:
             from textual.widgets import TabbedContent as _TC
+
             if self.query_one("#center-tabs", _TC).active == target_tab_id:
                 prompt.disabled = True
                 prompt.add_class("streaming")
@@ -174,6 +187,7 @@ class AgentsMixin(_MixinBase):
             _spin_idx = (_spin_idx + 1) % len(SPINNER)
             try:
                 from textual.widgets import TabbedContent as _TC2
+
                 if self.query_one("#center-tabs", _TC2).active == target_tab_id:
                     dbg = "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else ""
                     prompt.border_title = f"{SPINNER[_spin_idx]} {_spin_label}{dbg}"
@@ -183,12 +197,14 @@ class AgentsMixin(_MixinBase):
         timer = self.set_interval(0.08, _tick)
 
         preview = content[:300] + ("…" if len(content) > 300 else "")
-        await scroll.mount(Collapsible(
-            _Static(preview, markup=False),
-            title=f"📨 來自 {sender}",
-            collapsed=True,
-            classes="inbox-bubble",
-        ))
+        await scroll.mount(
+            Collapsible(
+                _Static(preview, markup=False),
+                title=f"📨 來自 {sender}",
+                collapsed=True,
+                classes="inbox-bubble",
+            )
+        )
         stream_msg: "AIMessage | None" = None
         buf: list[str] = []
 
@@ -197,7 +213,11 @@ class AgentsMixin(_MixinBase):
             _spin_label = "生成中"
             buf.append(chunk)
             if stream_msg is None:
-                await scroll.mount(_Static(f"🤖 {agent.display_name}", classes="ai-header", markup=False))
+                await scroll.mount(
+                    _Static(
+                        f"🤖 {agent.display_name}", classes="ai-header", markup=False
+                    )
+                )
                 stream_msg = AIMessage()
                 await scroll.mount(stream_msg)
             await stream_msg.update_content("".join(buf))
@@ -207,14 +227,20 @@ class AgentsMixin(_MixinBase):
             if stream_msg is None:
                 return
             hist = agent.history
-            display = str(hist[-1]["content"]) if hist and hist[-1]["role"] == "assistant" else "".join(buf)
+            display = (
+                str(hist[-1]["content"])
+                if hist and hist[-1]["role"] == "assistant"
+                else "".join(buf)
+            )
             await stream_msg.update_content(display, final=True)
 
         async def on_tool_call(name: str, args: dict, tr: "ToolResult") -> None:
             nonlocal _spin_label, stream_msg, buf
             _spin_label = "工具回應中"
             if stream_msg and buf:
-                _pre = _re.sub(r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=_re.DOTALL).rstrip()
+                _pre = _re.sub(
+                    r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=_re.DOTALL
+                ).rstrip()
                 await stream_msg.update_content(_pre, final=True)
                 stream_msg = None
                 buf.clear()
@@ -225,26 +251,35 @@ class AgentsMixin(_MixinBase):
             card_cls = "tool-debug tool-debug-error" if is_err else "tool-debug"
             if not self.ui_state.debug_tools:
                 if is_err:
-                    await scroll.mount(Collapsible(
-                        _Static(result[:600], markup=False),
-                        title=f"{icon} {name}  [dim]工具錯誤[/dim]",
-                        collapsed=True, classes=card_cls,
-                    ))
+                    await scroll.mount(
+                        Collapsible(
+                            _Static(result[:600], markup=False),
+                            title=f"{icon} {name}  [dim]工具錯誤[/dim]",
+                            collapsed=True,
+                            classes=card_cls,
+                        )
+                    )
                 return
             args_str = _json.dumps(args, ensure_ascii=False, indent=2)
             body = f"ARGS:\n{args_str}\n\nRESULT:\n{result[:2000]}"
-            await scroll.mount(Collapsible(
-                _Static(body, markup=False),
-                title=f"{icon} {name}",
-                collapsed=True, classes=card_cls,
-            ))
+            await scroll.mount(
+                Collapsible(
+                    _Static(body, markup=False),
+                    title=f"{icon} {name}",
+                    collapsed=True,
+                    classes=card_cls,
+                )
+            )
             scroll.scroll_end(animate=False)
 
         if is_main_target:
             full_content = content
         else:
             reply_to = "main" if sender == self.agents.main.display_name else sender
-            full_content = content + f"\n\n[系統]完成後必須呼叫 send_to_agent(\"{reply_to}\", 結果摘要) 回報。"
+            full_content = (
+                content
+                + f'\n\n[系統]完成後必須呼叫 send_to_agent("{reply_to}", 結果摘要) 回報。'
+            )
 
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
         # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
@@ -253,19 +288,26 @@ class AgentsMixin(_MixinBase):
             async with agent._chat_lock:
                 await agent.chat(
                     {"role": "user", "content": full_content, "_inbox_sender": sender},
-                    on_token=on_token, on_done=on_done, on_tool_call=on_tool_call,
+                    on_token=on_token,
+                    on_done=on_done,
+                    on_tool_call=on_tool_call,
                 )
         except Exception as e:
             # @work 預設 exit_on_error：未接住的例外（API 額度用完、網路中斷）會讓整個 app 關閉
             logger.exception(f"[inbox] {agent.display_name} 處理失敗")
-            await scroll.mount(_Static(f"❌ 錯誤：{e}", classes="error-msg", markup=False))
+            await scroll.mount(
+                _Static(f"❌ 錯誤：{e}", classes="error-msg", markup=False)
+            )
             scroll.scroll_end(animate=False)
-            self.notify(f"{agent.display_name} 處理 {sender} 的訊息失敗：{e}", severity="error")
+            self.notify(
+                f"{agent.display_name} 處理 {sender} 的訊息失敗：{e}", severity="error"
+            )
         finally:
             timer.stop()
             self.tab_state.streaming_tabs.discard(target_tab_id)
             try:
                 from textual.widgets import TabbedContent as _TC3
+
                 if self.query_one("#center-tabs", _TC3).active == target_tab_id:
                     prompt.disabled = False
                     prompt.remove_class("streaming")
@@ -275,10 +317,13 @@ class AgentsMixin(_MixinBase):
                 pass
 
     @work
-    async def _trigger_greeting(self, agent: "Agent", scroll: "VerticalScroll", greeting_prompt: str) -> None:
+    async def _trigger_greeting(
+        self, agent: "Agent", scroll: "VerticalScroll", greeting_prompt: str
+    ) -> None:
         """讓 agent 主動說第一句話。trigger 不存入 history，只保留 assistant 回覆。"""
         from textual.widgets import Static as _Static
         from widgets.chat import AIMessage
+
         prompt = self.query_one("#prompt", HistoryInput)
         prompt.disabled = True
         prompt.border_title = f"{SPINNER[0]} {agent.display_name} 開場中…"
@@ -297,7 +342,11 @@ class AgentsMixin(_MixinBase):
             nonlocal stream_msg
             buf.append(chunk)
             if stream_msg is None:
-                await scroll.mount(_Static(f"🤖 {agent.display_name}", classes="ai-header", markup=False))
+                await scroll.mount(
+                    _Static(
+                        f"🤖 {agent.display_name}", classes="ai-header", markup=False
+                    )
+                )
                 stream_msg = AIMessage()
                 await scroll.mount(stream_msg)
             await stream_msg.update_content("".join(buf))
@@ -321,7 +370,8 @@ class AgentsMixin(_MixinBase):
                 )
             # 把 trigger user message 從 history 移除，只保留 assistant 開場白
             agent.history = [
-                m for m in agent.history
+                m
+                for m in agent.history
                 if not (m.get("role") == "user" and m.get("content") == greeting_prompt)
             ]
             agent.save_history()
@@ -341,7 +391,10 @@ class AgentsMixin(_MixinBase):
         """
         adir = self.agent._agent_dir
         if not adir:
-            self.notify("目前 agent 沒有 config.json（主 chat 不支援此指令）", severity="warning")
+            self.notify(
+                "目前 agent 沒有 config.json（主 chat 不支援此指令）",
+                severity="warning",
+            )
             return
         config_path = adir / "config.json"
         if not config_path.exists():
@@ -362,6 +415,7 @@ class AgentsMixin(_MixinBase):
         # 更新 UI
         from widgets.sidebar import Sidebar
         from widgets.input import HistoryInput
+
         sidebar = self.query_one("#sidebar", Sidebar)
         sidebar.set_model(self.agent.profile.name)
         mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
@@ -395,7 +449,9 @@ class AgentsMixin(_MixinBase):
                     self.notify(str(e), severity="error")
                     return
                 agent_name = adir.name
-                scope_path = "~/.kai/agents" if scoped_name.startswith("global:") else "agents"
+                scope_path = (
+                    "~/.kai/agents" if scoped_name.startswith("global:") else "agents"
+                )
                 agents_meta.append((agent_name, scope_path, adir.name))
 
             def _on_confirmed(confirmed: bool) -> None:
@@ -421,6 +477,7 @@ class AgentsMixin(_MixinBase):
             def _on_selected(selected: list[str]) -> None:
                 if selected:
                     _confirm_and_delete_many(selected)
+
             self.push_screen(DeleteAgentsScreen(agents_list), _on_selected)
 
         if not name:
@@ -431,6 +488,7 @@ class AgentsMixin(_MixinBase):
             _open_panel(agents)
         else:
             from core.agent_factory import find_all_agents
+
             matches = find_all_agents(name)
             if not matches:
                 self.notify(f"找不到 agent：{name}", severity="error")
@@ -445,9 +503,13 @@ class AgentsMixin(_MixinBase):
     async def _do_list_agents(self) -> None:
         from core.agent_factory import list_agents
         from widgets.agents_screen import AgentsScreen
+
         agents = list_agents()
         if not agents:
-            self.notify("agents/ 和 ~/.kai/agents/ 都是空的，用 /create-agent 建立第一個 agent", severity="warning")
+            self.notify(
+                "agents/ 和 ~/.kai/agents/ 都是空的，用 /create-agent 建立第一個 agent",
+                severity="warning",
+            )
             return
 
         async def _on_result(dir_name: str | None) -> None:

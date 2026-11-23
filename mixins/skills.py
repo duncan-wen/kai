@@ -1,4 +1,5 @@
 """SkillsMixin — /skills 指令邏輯（鏡像 MCPMixin）。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

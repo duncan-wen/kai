@@ -1,4 +1,5 @@
 """ResumeScreen — archive 選擇器 ModalScreen。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -88,9 +89,15 @@ class ResumeScreen(ModalScreen[Path | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="resume-dialog"):
             yield Label("📂 Archive", id="resume-title")
-            yield OptionList(*[self._make_option(i) for i in range(len(self._entries))], id="resume-list")
+            yield OptionList(
+                *[self._make_option(i) for i in range(len(self._entries))],
+                id="resume-list",
+            )
             yield Input(placeholder="輸入名稱… Enter 確認  Esc 取消", id="rename-input")
-            yield Label("[dim]↑↓ 選擇  Enter / 點擊 載入  r 重命名  d 刪除  Esc 關閉[/dim]", id="resume-hint")
+            yield Label(
+                "[dim]↑↓ 選擇  Enter / 點擊 載入  r 重命名  d 刪除  Esc 關閉[/dim]",
+                id="resume-hint",
+            )
 
     # ── rename flow ───────────────────────────────────────────────────────────
 
@@ -131,7 +138,9 @@ class ResumeScreen(ModalScreen[Path | None]):
         # 更新該列的顯示
         if restore_idx is not None:
             ol = self.query_one("#resume-list", OptionList)
-            ol.replace_option_prompt(str(restore_idx), self._make_option(restore_idx).prompt)
+            ol.replace_option_prompt(
+                str(restore_idx), self._make_option(restore_idx).prompt
+            )
         self.query_one("#resume-list", OptionList).focus()
 
     # ── delete ───────────────────────────────────────────────────────────────

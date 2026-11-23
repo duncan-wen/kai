@@ -134,14 +134,18 @@ async def web_search(query: str, num_results: int = _cfg.SEARCH_NUM_RESULTS) -> 
         @retry(
             stop=stop_after_attempt(_cfg.SEARCH_RETRIES + 1),
             wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-            retry=retry_if_exception_type((httpx.TimeoutException, httpx.HTTPStatusError)),
+            retry=retry_if_exception_type(
+                (httpx.TimeoutException, httpx.HTTPStatusError)
+            ),
             before_sleep=lambda state: logger.warning(
                 f"搜尋 '{query}' 第 {state.attempt_number} 次失敗，重試中..."
             ),
             reraise=True,
         )
         async def _fetch() -> list:
-            resp = await client.get(_cfg.SEARXNG_URL, params={"q": query, "format": "json"})
+            resp = await client.get(
+                _cfg.SEARXNG_URL, params={"q": query, "format": "json"}
+            )
             resp.raise_for_status()
             return resp.json().get("results", [])
 
@@ -174,6 +178,7 @@ async def fetch_url(url: str) -> str:
 async def fetch_urls(urls: list) -> str:
     """並行抓取多個網頁（最多 5 個），共用同一個 httpx 連線池。"""
     import asyncio
+
     targets = urls[:5]
     per_limit = max(_cfg.FETCH_MAX_CHARS // len(targets), 2000)
     async with httpx.AsyncClient(timeout=20.0) as client:

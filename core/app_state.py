@@ -9,6 +9,7 @@
 asyncio 生命週期物件（_mcp_task、_bash_proc、_tts_future 等）
 不屬於任何狀態域，仍以 self._xxx 存放於 ChatApp。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

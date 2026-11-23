@@ -1,4 +1,5 @@
 """Agent Factory — /create-agent, /load-agent, /list-agents 的核心邏輯。"""
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,9 @@ class AgentDefinition(BaseModel):
     greeting: str = ""
     history_keep: int | None = None  # None = 用全域 HISTORY_KEEP
     datasets: list[str] = []
-    mcp_servers: dict | None = None  # {} = 不用 MCP；None 或非空 = 共用 main agent 的 MCP
+    mcp_servers: dict | None = (
+        None  # {} = 不用 MCP；None 或非空 = 共用 main agent 的 MCP
+    )
     tts: dict | None = None
 
     @field_validator("tts", mode="before")
@@ -40,6 +43,7 @@ class AgentDefinition(BaseModel):
     @property
     def display_name(self) -> str:
         return self.nickname or self.name
+
 
 GLOBAL_AGENTS_DIR = Path.home() / ".kai" / "agents"
 
@@ -69,19 +73,24 @@ async def _call_backend(design_model: str, messages: list[dict]) -> str:
     """直接呼叫 ollama / openai-compat backend，回傳原始文字。"""
     import core.config as _cfg
     from core.models import get_profile
+
     profile = get_profile(design_model)
     if profile.backend == "ollama":
         import ollama
+
         resp = await ollama.AsyncClient().chat(model=profile.name, messages=messages)
         return resp.message.content or ""
     from openai import AsyncOpenAI
+
     if profile.backend == "gemini":
         client = AsyncOpenAI(
             api_key=_cfg.GEMINI_API_KEY,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
     elif profile.backend == "deepseek":
-        client = AsyncOpenAI(api_key=_cfg.DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+        client = AsyncOpenAI(
+            api_key=_cfg.DEEPSEEK_API_KEY, base_url="https://api.deepseek.com"
+        )
     else:
         raise ValueError(f"未知 backend：{profile.backend!r}，請確認 REGISTRY 設定")
     resp = await client.chat.completions.create(model=profile.name, messages=messages)
@@ -92,10 +101,14 @@ async def call_full_design(description: str) -> dict[str, Any]:
     """用 CREATE_AGENT_MODEL 從自由文字描述生成完整 agent config dict。"""
     import core.config as _cfg
     from core.models import REGISTRY
+
     design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
     model_list = ", ".join(REGISTRY.keys())
     prompt = _apply_template(
-        _DESIGN_BASE, description=description, models=model_list, default_model=_cfg.MODEL,
+        _DESIGN_BASE,
+        description=description,
+        models=model_list,
+        default_model=_cfg.MODEL,
     )
     raw = await _call_backend(design_model, [{"role": "user", "content": prompt}])
     try:
@@ -109,8 +122,11 @@ async def call_design_model(name: str, description: str) -> tuple[str, str, dict
     extras 可能包含 datasets、tts 等 LLM 自行判斷需要的條件欄位。
     """
     import core.config as _cfg
+
     design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
-    prompt = _apply_template(DESIGN_SYSTEM_PROMPT, name=name, description=description or name)
+    prompt = _apply_template(
+        DESIGN_SYSTEM_PROMPT, name=name, description=description or name
+    )
     raw = await _call_backend(design_model, [{"role": "user", "content": prompt}])
     try:
         data = extract_json(raw)
@@ -161,7 +177,10 @@ def list_agents() -> list[dict[str, Any]]:
     local 排在前面；同一 scope 內按目錄名排序。
     """
     result = []
-    for scope, base in (("local", Path.cwd() / "agents"), ("global", GLOBAL_AGENTS_DIR)):
+    for scope, base in (
+        ("local", Path.cwd() / "agents"),
+        ("global", GLOBAL_AGENTS_DIR),
+    ):
         if not base.exists():
             continue
         for p in sorted(base.iterdir()):
@@ -172,14 +191,16 @@ def list_agents() -> list[dict[str, Any]]:
                 continue
             try:
                 data = json.loads(cfg.read_text(encoding="utf-8"))
-                result.append({
-                    "dir": p.name,
-                    "scope": scope,
-                    "name": data.get("name", p.name),
-                    "nickname": data.get("nickname", ""),
-                    "model": data.get("model", ""),
-                    "description": data.get("description", ""),
-                })
+                result.append(
+                    {
+                        "dir": p.name,
+                        "scope": scope,
+                        "name": data.get("name", p.name),
+                        "nickname": data.get("nickname", ""),
+                        "model": data.get("model", ""),
+                        "description": data.get("description", ""),
+                    }
+                )
             except Exception:
                 pass
     return result
@@ -218,8 +239,12 @@ def find_agent(query: str) -> str | None:
     checks = [
         lambda a: a["dir"].lower() == q,
         lambda a: a["name"].lower() == q or (a["nickname"] or "").lower() == q,
-        lambda a: q in a["name"].lower() or bool(a["nickname"] and q in a["nickname"].lower()),
-        lambda a: a["name"].lower() in q or bool(a["nickname"] and a["nickname"].lower() in q),
+        lambda a: (
+            q in a["name"].lower() or bool(a["nickname"] and q in a["nickname"].lower())
+        ),
+        lambda a: (
+            a["name"].lower() in q or bool(a["nickname"] and a["nickname"].lower() in q)
+        ),
         lambda a: bool(a.get("description") and q in a["description"].lower()),
     ]
     for check in checks:
@@ -254,9 +279,7 @@ def find_agent_dir(name: str) -> Path:
             if (base / candidate / "config.json").exists():
                 return base / candidate
 
-    raise FileNotFoundError(
-        f"找不到 agent：{name}（搜尋：{[str(b) for b in bases]}）"
-    )
+    raise FileNotFoundError(f"找不到 agent：{name}（搜尋：{[str(b) for b in bases]}）")
 
 
 def read_definition(config_path: Path) -> AgentDefinition:
@@ -290,7 +313,8 @@ def save_agent(data: dict[str, Any], global_scope: bool = False) -> Path:
         history_file.write_text(
             json.dumps(
                 [{"role": "system", "content": system_prompt_content}],
-                ensure_ascii=False, indent=2,
+                ensure_ascii=False,
+                indent=2,
             ),
             encoding="utf-8",
         )
@@ -300,9 +324,12 @@ def save_agent(data: dict[str, Any], global_scope: bool = False) -> Path:
 def delete_agent(scoped_name: str) -> str:
     """刪除 agent 目錄（含 config.json / history.json），回傳 agent 顯示名稱。"""
     import shutil
+
     adir = find_agent_dir(scoped_name)
     try:
-        display_name = json.loads((adir / "config.json").read_text(encoding="utf-8")).get("name", adir.name)
+        display_name = json.loads(
+            (adir / "config.json").read_text(encoding="utf-8")
+        ).get("name", adir.name)
     except Exception:
         display_name = adir.name
     shutil.rmtree(adir)
