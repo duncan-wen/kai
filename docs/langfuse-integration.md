@@ -120,8 +120,8 @@ chat-turn」。
 **兩個根因**：
 
 1. **訊息形狀不合**：Langfuse Sessions 只讀 trace **根節點**的 `input` / `output`，且必須是
-   `{"role", "content"}` 形狀才渲染成對話泡泡。原本寫的是 `{"user": ...}` / `{"reply": ...}`，
-   所以有資料但渲染不出來。
+   **`{"role", "content"}` 的陣列**（`[{"role": "user", "content": ...}]`）才渲染成對話泡泡。
+   原本寫的是 `{"user": ...}` / `{"reply": ...}`，所以有資料但渲染不出來。
 2. **巢狀而非獨立 trace**：`chat-turn` 若在已有外層 span 的 context 中被建立，會變成子節點，
    而 Sessions 只看根節點 → 讀不到。
 
@@ -129,7 +129,7 @@ chat-turn」。
 
 | 位置 | 改動 |
 |------|------|
-| `core/langfuse_client.py` | 新增 `user_message()` / `assistant_message()` 產生標準訊息形狀 |
+| `core/langfuse_client.py` | 新增 `user_message()` / `assistant_message()` 產生標準訊息**陣列** |
 | `core/langfuse_client.py` `trace()` | 進入前 `attach(Context())` 脫離既有 OTel context，**強制**成為新 trace 根節點，離開時 `detach` |
 | `core/agent.py` `chat()` | `input` 改 `user_message(...)`、`output` 改 `assistant_message(...)`；新增 `_turn_reply_text()` 只取**本輪**最後一則 assistant 訊息 |
 
@@ -141,6 +141,21 @@ session 分組沿用 `SessionStore.session_id`（未命名為 `history-YYYYMMDD-
 **驗證**：`tests/test_langfuse_client.py` 新增 4 個測試（訊息形狀、input 傳遞、只看本輪回覆）；
 並以 OTel InMemorySpanExporter 實證外層有 span 時 `chat-turn` 仍為 root（`parent=None`、
 trace_id 不同）。
+
+### 補充：ChatML 解析器只吃陣列（同日修正）
+
+首版 `user_message()` / `assistant_message()` 回傳單一 dict（`{"role": "user", "content": "好"}`），
+Sessions 頁面仍空白 —— 因為 Langfuse 的 ChatML 解析器偵測的是**訊息陣列**，單一 dict 會被視為
+一般 JSON payload 而不做對話渲染。
+
+改成回傳 `list[dict]` 後才正確：
+
+```python
+user_message("好")      # -> [{"role": "user", "content": "好"}]
+assistant_message("嗨")  # -> [{"role": "assistant", "content": "嗨"}]
+```
+
+呼叫端（`agent.py` 的 `input=` / `output=`）不需改動，helpers 已封裝形狀。
 
 ## 已知注意事項
 

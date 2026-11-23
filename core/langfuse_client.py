@@ -72,14 +72,18 @@ def flush() -> None:
             logger.warning(f"Langfuse flush 失敗：{e}")
 
 
-def user_message(text: str) -> dict:
-    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀。"""
-    return {"role": "user", "content": text}
+def user_message(text: str) -> list[dict]:
+    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀。
+
+    ChatML 解析器只認「訊息陣列」（List[dict]）；單一 dict 會被當成一般 JSON，
+    Messages 視圖因此渲染不出對話泡泡。
+    """
+    return [{"role": "user", "content": text}]
 
 
-def assistant_message(text: str) -> dict:
-    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀。"""
-    return {"role": "assistant", "content": text}
+def assistant_message(text: str) -> list[dict]:
+    """Langfuse Sessions（Messages 視圖）要求的對話訊息形狀（訊息陣列）。"""
+    return [{"role": "assistant", "content": text}]
 
 
 @contextmanager

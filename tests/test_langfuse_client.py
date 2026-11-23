@@ -182,8 +182,16 @@ def test_generation_messages_system_off_by_config(monkeypatch):
 
 def test_message_helpers_use_role_content_shape():
     """Sessions（Messages 視圖）只認 {"role","content"}；用 {"user"}/{"reply"} 會渲染不出來。"""
-    assert lf.user_message("hi") == {"role": "user", "content": "hi"}
-    assert lf.assistant_message("yo") == {"role": "assistant", "content": "yo"}
+    assert lf.user_message("hi") == [{"role": "user", "content": "hi"}]
+    assert lf.assistant_message("yo") == [{"role": "assistant", "content": "yo"}]
+
+
+def test_message_helpers_return_list_not_dict():
+    """ChatML 解析器吃「訊息陣列」；單一 dict 會被當一般 JSON 而渲染不出對話。"""
+    for msg in (lf.user_message("hi"), lf.assistant_message("yo")):
+        assert isinstance(msg, list), f"應為 list，實際 {type(msg).__name__}"
+        assert len(msg) == 1
+        assert set(msg[0]) == {"role", "content"}
 
 
 def test_trace_passes_message_input_to_sdk(monkeypatch):
@@ -211,7 +219,7 @@ def test_trace_passes_message_input_to_sdk(monkeypatch):
     with lf.trace(name="chat-turn", session_id="history-1", input=lf.user_message("hi")) as span:
         assert span is not None
     assert captured["name"] == "chat-turn"
-    assert captured["input"] == {"role": "user", "content": "hi"}
+    assert captured["input"] == [{"role": "user", "content": "hi"}]
     assert captured["as_type"] == "span"
 
 
