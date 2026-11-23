@@ -1,9 +1,24 @@
 [project]
 name = "kai"
 version = "0.1.0"
-description = "Terminal AI agent TUI — Ollama / Gemini / MCP, built with Textual"
+description = "Multi-agent AI platform for the terminal — Agent Factory, MCP, Skills, local & cloud LLMs (Ollama / Gemini / DeepSeek), built with Textual"
+readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Duncan Wen" }]
+keywords = ["ai-agent", "llm", "mcp", "ollama", "tui", "textual", "terminal", "langfuse"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: Developers",
+    "Natural Language :: Chinese (Traditional)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Terminals",
+]
 dependencies = [
     "httpx>=0.28.1",
     "loguru>=0.7.3",
@@ -23,6 +38,13 @@ dependencies = [
     "pyyaml>=6.0.4",
     "langfuse>=5.2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/duncan-wen/kai"
+Repository = "https://github.com/duncan-wen/kai"
+Issues = "https://github.com/duncan-wen/kai/issues"
+Changelog = "https://github.com/duncan-wen/kai/blob/main/CHANGELOG.md"
+Security = "https://github.com/duncan-wen/kai/security/policy"
 
 [project.optional-dependencies]
 # 本地 / Docker TTS 引擎（kokoro、melotts、kokoro-api 去雜音）；edge-tts 與 azure-tts 不需要
