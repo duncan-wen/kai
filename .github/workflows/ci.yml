@@ -14,7 +14,7 @@ jobs:
         with:
           enable-cache: true
       - name: 安裝依賴
-        run: uv sync --locked
+        run: uv sync --locked --extra observability
       - name: Lint
         run: uv run ruff check .
       - name: Format

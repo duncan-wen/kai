@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install (all extras = local TTS engines kokoro / melotts)
+# Install (all extras = local TTS engines kokoro / melotts + Langfuse observability)
 uv sync --all-extras
 
 # Run the Textual TUI

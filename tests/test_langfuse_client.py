@@ -204,7 +204,10 @@ def test_message_helpers_return_list_not_dict():
 def test_trace_passes_message_input_to_sdk(monkeypatch):
     """trace() 需把 input 原樣交給 start_as_current_observation（掛在 trace 根節點）。"""
     import contextlib
-    import langfuse
+
+    import pytest
+
+    langfuse = pytest.importorskip("langfuse")  # 選配依賴（extra: observability）
 
     captured = {}
 
@@ -493,3 +496,23 @@ def test_compact_fallback_models_are_registered():
 
     assert REGISTRY[COMPACT_FALLBACK_DEEPSEEK].backend == "deepseek"
     assert REGISTRY[COMPACT_FALLBACK_GEMINI].backend == "gemini"
+
+
+def test_missing_sdk_disables_tracing(monkeypatch):
+    """設了金鑰但沒裝 langfuse（選配依賴）→ 追蹤停用，不拋例外。"""
+    import builtins
+
+    monkeypatch.setattr("core.config.LANGFUSE_PUBLIC_KEY", "pk-lf-x")
+    monkeypatch.setattr("core.config.LANGFUSE_SECRET_KEY", "sk-lf-x")
+    real_import = builtins.__import__
+
+    def _no_langfuse(name, *a, **kw):
+        if name == "langfuse" or name.startswith("langfuse."):
+            raise ImportError("No module named 'langfuse'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", _no_langfuse)
+    _reset()
+    assert lf.get_langfuse() is None
+    with lf.trace(name="chat-turn", session_id="s") as span:
+        assert span is None

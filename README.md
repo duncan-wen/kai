@@ -40,7 +40,7 @@
 
 ### 🔭 可觀測性：每一輪對話都追得到
 
-選配 [Langfuse](https://langfuse.com)：在 `.env` 填入 `LANGFUSE_*` 金鑰即啟用，每輪對話的模型呼叫、工具呼叫、token 用量與成本（含 cache 命中）都會被追蹤，Sessions 頁面可重播整段對話。上傳前會遮罩常見格式的密鑰；未設定金鑰時完全不啟用。
+選配 [Langfuse](https://langfuse.com)：`uv sync --extra observability` 安裝後，在 `.env` 填入 `LANGFUSE_*` 金鑰即啟用，每輪對話的模型呼叫、工具呼叫、token 用量與成本（含 cache 命中）都會被追蹤，Sessions 頁面可重播整段對話。上傳前會遮罩常見格式的密鑰；未安裝或未設定金鑰時完全不啟用。
 
 ### 🧩 不被單一供應商綁架
 
@@ -56,7 +56,7 @@ Textual 打造的完整 TUI，不是網頁套殼：檔案樹、語法高亮檢�
 
 ```bash
 git clone https://github.com/duncan-wen/kai.git && cd kai
-uv sync                     # 需要 kokoro / melotts TTS 時：uv sync --extra tts
+uv sync                     # 選配：--extra tts（kokoro / melotts）、--extra observability（Langfuse）
 cp .env.example .env        # 填入 API keys 與 SEARXNG_SECRET（openssl rand -hex 32）
 docker compose up -d        # 啟動 SearXNG（web_search 用，可略過）
 uv run python app.py                 # 在目前目錄啟動

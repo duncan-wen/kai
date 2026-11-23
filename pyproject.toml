@@ -36,7 +36,6 @@ dependencies = [
     "edge-tts>=7.2.8",
     "textual-fspicker>=1.0.1",
     "pyyaml>=6.0.4",
-    "langfuse>=5.2.0",
 ]
 
 [project.urls]
@@ -47,6 +46,10 @@ Changelog = "https://github.com/duncan-wen/kai/blob/main/CHANGELOG.md"
 Security = "https://github.com/duncan-wen/kai/security/policy"
 
 [project.optional-dependencies]
+# Langfuse 可觀測性（選配）：未安裝或未設金鑰時追蹤完全停用
+observability = [
+    "langfuse>=5.2.0",
+]
 # 本地 / Docker TTS 引擎（kokoro、melotts、kokoro-api 去雜音）；edge-tts 與 azure-tts 不需要
 tts = [
     "kokoro-onnx>=0.5.0",

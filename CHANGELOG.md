@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 變更
+
+- `langfuse` 改為選配依賴：需 `uv sync --extra observability` 才會安裝，
+  省下約 10 個只有追蹤功能用到的套件（OpenTelemetry、protobuf 等）。
+  設了 `LANGFUSE_*` 金鑰但未安裝時，會在 log 提示並停用追蹤
+- 移除未使用的 dev 依賴 `ipykernel`
+
 ## [0.1.0] - 2026-11-23
 
 第一個正式版本。

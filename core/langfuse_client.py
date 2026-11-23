@@ -43,7 +43,14 @@ def get_langfuse():
         return None
     try:
         from langfuse import Langfuse
-
+    except ImportError:
+        # langfuse 是選配依賴（extra: observability）；設了金鑰卻沒裝時明確提示
+        logger.warning(
+            "已設定 LANGFUSE 金鑰但未安裝 langfuse，追蹤停用；請執行 uv sync --extra observability"
+        )
+        _client = None
+        return None
+    try:
         _client = Langfuse(
             environment=getattr(_cfg, "LANGFUSE_TRACING_ENVIRONMENT", "") or None,
             mask=mask_secrets,
