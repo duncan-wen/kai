@@ -59,5 +59,4 @@ dev = [
     "ruff>=0.15.12",
     "textual-dev>=1.8.0",
     "pytest>=8.0",
-    "ipykernel>=7.2.0",
 ]

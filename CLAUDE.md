@@ -377,7 +377,7 @@ Two config files control MCP servers (subagents share the main agent's MCP clien
 | `~/.kai/mcp_servers.json` | global (user home) | MCP servers available to all agents across all projects |
 | `cwd/.kai/mcp_servers.json` | project-local | project-specific MCP servers; merged with global |
 
-Disabled servers use a `_` prefix in `mcp_servers.json` (e.g. `_playwright`, `_twstock-db`). The `_` prefix convention prevents accidental activation — remove it to enable.
+Disabled servers use a `_` prefix in `mcp_servers.json` (e.g. `_playwright`, `_filesystem`). The `_` prefix convention prevents accidental activation — remove it to enable.
 
 ## Environment variables (`.env`)
 

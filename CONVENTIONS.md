@@ -19,7 +19,7 @@
 | 類別 | `PascalCase` | `MCPClient`, `ModelProfile` |
 | 常數（模組層級） | `UPPER_SNAKE` | `MAX_TOOL_CALLS`, `SEARCH_TOOL` |
 | 私有 / 內部方法 | `_` 前綴 | `_reset_date`, `_cancelled` |
-| 停用的 MCP server | `_` 前綴（於 mcp_servers.json）| `_twstock-db` |
+| 停用的 MCP server | `_` 前綴（於 mcp_servers.json）| `_playwright` |
 
 ## 程式碼風格
 

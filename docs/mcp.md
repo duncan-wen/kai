@@ -158,7 +158,6 @@ MCP 工具的 schema（名稱、描述、參數定義）會佔用 context window
 | `RepoMapper` | MCP stdio | 自訂工具，回傳結構化程式碼地圖 |
 | `_playwright` | MCP（停用）| 有狀態；有需要時移除 `_` 前綴啟用 |
 | `_filesystem` | MCP（停用）| bash 能做，多餘的 token 開銷 |
-| `_twstock-db` | MCP（停用）| 結構化查詢值得 MCP；有需要時啟用 |
 
 ### MCP 的獨特優勢（bash 做不到的）
 

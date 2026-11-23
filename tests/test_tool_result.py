@@ -1,6 +1,6 @@
 """core.tools.result / dispatch — 工具錯誤以結構化旗標回報（不再掃字串猜測）。
 
-對應 docs/issues/tool-debug-display.md：
+背景：原本以字串關鍵字比對猜測工具是否出錯，造成以下問題：
 1. 誤塗紅：成功回傳的程式碼片段含 "Traceback" 字樣不應被判為錯誤。
 2. 漏判：工具拋例外必須標記 is_error。
 3. 不一致：streaming 與 agents 兩條路徑共用同一組旗標語意。
