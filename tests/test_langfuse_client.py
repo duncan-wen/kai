@@ -427,3 +427,17 @@ def test_record_result_marks_errors():
 
 def test_generation_name_is_backend_agnostic():
     assert lf.GENERATION_NAME == "generate-response"
+
+
+def test_mask_secrets_learns_values_from_assignments(monkeypatch):
+    """賦值裡認出的值，之後單獨出現（例如模型 thinking 引用）也要遮。"""
+    monkeypatch.setattr(lf, "_learned_secrets", set())
+    lf.mask_secrets(data="用 bash 執行 echo DEMO_API_KEY=abc12345secret")
+    out = lf.mask_secrets(data={"thinking": '"abc12345secret" looks like a placeholder'})
+    assert "abc12345secret" not in out["thinking"]
+
+
+def test_mask_secrets_does_not_learn_short_values(monkeypatch):
+    monkeypatch.setattr(lf, "_learned_secrets", set())
+    lf.mask_secrets(data="password: abcd")
+    assert lf.mask_secrets(data="abcd efgh") == "abcd efgh"

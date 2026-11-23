@@ -95,14 +95,26 @@ _ASSIGNMENTS = [
 ]
 _SENSITIVE_ENV = re.compile(r"(?i)(KEY|SECRET|TOKEN|PASSWORD|PASSWD)")
 
+# 從賦值形式認出的密鑰值：之後在任何地方單獨出現也遮掉
+# （例如模型在 thinking 裡寫「"abc12345secret" 看起來是 placeholder」，前面沒有 KEY=）。
+# 只存在記憶體、只增不減，上限避免無限成長。
+_learned_secrets: set[str] = set()
+_LEARNED_MAX = 1000
+
 
 def _known_secret_values() -> list[str]:
-    """目前環境變數中的密鑰原值（≥8 字元），長的先比對，避免部分取代。"""
+    """已知密鑰原值：環境變數（≥8 字元）＋先前從賦值認出的值；長的先比對，避免部分取代。"""
     values = {
         v for k, v in os.environ.items()
         if _SENSITIVE_ENV.search(k) and isinstance(v, str) and len(v) >= 8
     }
+    values |= _learned_secrets
     return sorted(values, key=len, reverse=True)
+
+
+def _learn(value: str) -> None:
+    if len(value) >= 6 and value != MASK and len(_learned_secrets) < _LEARNED_MAX:
+        _learned_secrets.add(value)
 
 
 def _mask_text(text: str, known: list[str]) -> str:
@@ -112,6 +124,8 @@ def _mask_text(text: str, known: list[str]) -> str:
     for pat in _SECRET_PATTERNS:
         text = pat.sub(MASK, text)
     for pat in _ASSIGNMENTS:
+        for m in pat.finditer(text):
+            _learn(m.group(2))
         text = pat.sub(lambda m: m.group(1) + MASK, text)
     return text
 
