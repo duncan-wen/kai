@@ -8,7 +8,7 @@ import re
 
 from loguru import logger
 from textual import work
-from textual.widgets import Collapsible, Markdown, Static, TabbedContent
+from textual.widgets import Collapsible, Markdown, Static
 
 
 from widgets.chat import AIMessage
@@ -45,25 +45,17 @@ class StreamingMixin(_MixinBase):
         self.input_state.last_send_text = original_text or text
         agent._cancelled = False
         # 記錄本次 streaming 所屬的 tab_id
-        try:
-            from textual.widgets import TabbedContent as _TC
-
-            _my_tab_id = self.query_one("#center-tabs", _TC).active or "chat"
-        except Exception:
-            _my_tab_id = "chat"
+        _my_tab_id = self.active_tab
         if not ephemeral:
             # 有新訊息代表已脫離 resume 快照
             self._session_store(agent).mark_active()
         _history_snapshot = [m.copy() for m in agent.history] if ephemeral else None
 
-        def _on_my_tab() -> bool:
-            return self.query_one("#center-tabs", TabbedContent).active == _my_tab_id
-
         # 只在送出時的 tab 上畫：切到別的 tab 時不蓋掉那邊的標題
-        spinner = PromptSpinner(prompt, "等待回覆", visible=_on_my_tab).start()
-        self.tab_state.streaming_tabs.add(_my_tab_id)
-        prompt.add_class("streaming")
-        prompt.disabled = True
+        self.mark_busy(_my_tab_id)
+        spinner = PromptSpinner(
+            prompt, "等待回覆", visible=lambda: self.active_tab == _my_tab_id
+        ).start()
         prompt.placeholder = ""
 
         try:
@@ -350,19 +342,11 @@ class StreamingMixin(_MixinBase):
 
         finally:
             spinner.stop()
-            self.tab_state.streaming_tabs.discard(_my_tab_id)
-            # 確認用戶目前是否還在這個 tab
-            try:
-                from textual.widgets import TabbedContent as _TC2
-
-                _active_now = self.query_one("#center-tabs", _TC2).active or "chat"
-            except Exception:
-                _active_now = _my_tab_id
-            if _active_now == _my_tab_id:
-                prompt.remove_class("streaming")
-                prompt.disabled = False
+            self.unmark_busy(
+                _my_tab_id
+            )  # 若使用者還在這個 tab，prompt 自動解鎖並 focus
+            if self.active_tab == _my_tab_id:
                 prompt.reset_prediction(f"傳訊息給 {agent.display_name}...")
-                prompt.focus()
                 # turn 中途要求的換模型此時才生效，同步顯示
                 self.refresh_agent_view()
                 if self.input_state.restore_input:
@@ -371,7 +355,7 @@ class StreamingMixin(_MixinBase):
                     prompt.value = restored
                     prompt.cursor_position = len(restored)
             else:
-                # 用戶已切換到其他 tab，prompt 狀態由 on_tabbed_content_tab_activated 管理
+                # 使用者已切到其他 tab：回填的輸入不適用那個 tab，丟掉
                 if self.input_state.restore_input:
                     self.input_state.restore_input = False
             if ephemeral and _history_snapshot is not None:

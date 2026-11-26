@@ -33,9 +33,14 @@ class AgentsMixin(_MixinBase):
 
         msgs = self._active_msgs()
         prompt = self.query_one("#prompt", HistoryInput)
-        prompt.disabled = True
+        my_tab = self.active_tab
         design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
-        spinner = PromptSpinner(prompt, f"設計 agent 中（{design_model}）…").start()
+        self.mark_busy(my_tab)
+        spinner = PromptSpinner(
+            prompt,
+            f"設計 agent 中（{design_model}）…",
+            visible=lambda: self.active_tab == my_tab,
+        ).start()
         await msgs.mount(
             Static(f"🏭 設計中：{description}", markup=False, classes="bash-output")
         )
@@ -65,8 +70,7 @@ class AgentsMixin(_MixinBase):
             self.notify(f"建立失敗：{e}", severity="error")
         finally:
             spinner.stop()
-            prompt.disabled = False
-            prompt.focus()
+            self.unmark_busy(my_tab)
 
     def _apply_definition(self, agent: "Agent", defn: "AgentDefinition") -> list[str]:
         """套用 definition 並顯示警告（例如未知模型）。回傳變更清單。"""
@@ -152,25 +156,15 @@ class AgentsMixin(_MixinBase):
             logger.warning(f"[inbox] dispatch: scroll '{scroll_id}' 不存在")
             return
 
-        # 加入 streaming_tabs，讓 tab 切換時 prompt 保持鎖定
-        self.tab_state.streaming_tabs.add(target_tab_id)
+        # 目標 tab 標成忙碌：使用者在（或切到）那個 tab 時 prompt 會鎖住
+        self.mark_busy(target_tab_id)
         prompt = self.query_one("#prompt", HistoryInput)
-        try:
-            from textual.widgets import TabbedContent as _TC
-
-            if self.query_one("#center-tabs", _TC).active == target_tab_id:
-                prompt.disabled = True
-                prompt.add_class("streaming")
-        except Exception:
-            pass
 
         # spinner：只在目標 agent 的 tab 是目前 tab 時才畫
         spinner = PromptSpinner(
             prompt,
             "等待回覆",
-            visible=lambda: (
-                self.query_one("#center-tabs", TabbedContent).active == target_tab_id
-            ),
+            visible=lambda: self.active_tab == target_tab_id,
         ).start()
 
         preview = content[:300] + ("…" if len(content) > 300 else "")
@@ -281,16 +275,7 @@ class AgentsMixin(_MixinBase):
             )
         finally:
             spinner.stop()
-            self.tab_state.streaming_tabs.discard(target_tab_id)
-            try:
-                from textual.widgets import TabbedContent as _TC3
-
-                if self.query_one("#center-tabs", _TC3).active == target_tab_id:
-                    prompt.disabled = False
-                    prompt.remove_class("streaming")
-                    prompt.focus()
-            except Exception:
-                pass
+            self.unmark_busy(target_tab_id)
 
     @work
     async def _trigger_greeting(
@@ -301,8 +286,13 @@ class AgentsMixin(_MixinBase):
         from widgets.chat import AIMessage
 
         prompt = self.query_one("#prompt", HistoryInput)
-        prompt.disabled = True
-        spinner = PromptSpinner(prompt, f"{agent.display_name} 開場中…").start()
+        my_tab = self.agents.tab_id_of(agent) or self.active_tab
+        self.mark_busy(my_tab)
+        spinner = PromptSpinner(
+            prompt,
+            f"{agent.display_name} 開場中…",
+            visible=lambda: self.active_tab == my_tab,
+        ).start()
         stream_msg: AIMessage | None = None
         buf: list[str] = []
 
@@ -347,10 +337,9 @@ class AgentsMixin(_MixinBase):
             self.notify(f"greeting 失敗：{e}", severity="warning")
         finally:
             spinner.stop()
-            prompt.disabled = False
+            self.unmark_busy(my_tab)
             if self.agent is agent:
                 prompt.reset_prediction(f"傳訊息給 {agent.display_name}...")
-                prompt.focus()
 
     async def _do_reload_agent(self) -> None:
         """重新從 config.json 熱更新執行中的 agent：system_prompt、model、nickname 全部套用。

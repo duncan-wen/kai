@@ -64,4 +64,3 @@ class TabState:
 
     file_tab_counter: int = 0
     pending_open_agent: str | None = None
-    streaming_tabs: set[str] = field(default_factory=set)

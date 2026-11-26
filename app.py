@@ -169,6 +169,12 @@ class ChatApp(
     """使用者手動切的 thinking；None = 跟模型預設。"""
     agent_view: reactive[AgentView] = reactive(AgentView, init=False)
     """作用中 Agent 的顯示快照；改了 agent 狀態後呼叫 refresh_agent_view()。"""
+    active_tab: reactive[str] = reactive("chat", init=False)
+    """畫面上的 center tab id（含檔案 tab）。"""
+    busy_tabs: reactive[tuple[str, ...]] = reactive((), init=False)
+    """有工作在跑的 tab id；可重複（同一 tab 同時有兩件工作）。用 mark_busy / unmark_busy 改。"""
+    prompt_locked: reactive[bool] = reactive(False, init=False)
+    """目前 tab 是否忙碌（compute_prompt_locked）；綁到 HistoryInput.locked。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -220,7 +226,9 @@ class ChatApp(
             yield Sidebar(id="sidebar").data_bind(view=ChatApp.agent_view)
         with Horizontal(id="input-row"):
             yield Static("📎", id="attach-btn", classes="attach-btn")
-            yield HistoryInput(id="prompt").data_bind(debug_mark=ChatApp.debug_tools)
+            yield HistoryInput(id="prompt").data_bind(
+                debug_mark=ChatApp.debug_tools, locked=ChatApp.prompt_locked
+            )
         yield ChatAutoComplete(target="#prompt", candidates=None)
         yield CapBar(id="cap-bar").data_bind(view=ChatApp.agent_view)
         yield Footer()
@@ -369,10 +377,8 @@ class ChatApp(
                 self._mcp_task.cancel()
         # 只有串流進行中才需要在退出時存檔；正常情況 agent.chat 已在每輪末尾呼叫 save_history，
         # 若無條件存檔會覆蓋使用者對 history.json 的手動編輯。
-        from widgets.input import HistoryInput
 
-        prompt = self.query_one("#prompt", HistoryInput)
-        if prompt.has_class("streaming"):
+        if self.prompt_locked:
             hist = self.agent.history
             if hist and hist[-1]["role"] == "user":
                 hist.pop()
@@ -735,6 +741,20 @@ class ChatApp(
                 f"傳訊息給 {new.display_name}..."
             )
 
+    def compute_prompt_locked(self) -> bool:
+        return self.active_tab in self.busy_tabs
+
+    def mark_busy(self, tab_id: str) -> None:
+        """標記 tab 開始一件工作；該 tab 在畫面上時 prompt 會鎖住。"""
+        self.busy_tabs = (*self.busy_tabs, tab_id)
+
+    def unmark_busy(self, tab_id: str) -> None:
+        """結束 tab 的一件工作；全部結束且該 tab 在畫面上時 prompt 解鎖並 focus。"""
+        busy = list(self.busy_tabs)
+        if tab_id in busy:
+            busy.remove(tab_id)
+        self.busy_tabs = tuple(busy)
+
     def watch_think_override(self) -> None:
         self.refresh_agent_view()
 
@@ -777,21 +797,15 @@ class ChatApp(
             return
         if self.agents.activate(tab_id):
             self._on_active_agent_changed()
-        # 根據新 tab 是否正在串流，恢復或保持 prompt 鎖定狀態
-        # （_send 結束時若使用者已不在原 tab，解鎖交給這裡）
-        prompt = self.query_one("#prompt", HistoryInput)
-        if tab_id in self.tab_state.streaming_tabs:
-            prompt.disabled = True
-            prompt.add_class("streaming")
-        else:
-            prompt.disabled = False
-            prompt.remove_class("streaming")
-            prompt.show_idle_title()
-            prompt.focus()
+        # prompt 鎖定由 prompt_locked（active_tab ∈ busy_tabs）決定
+        self.active_tab = tab_id
+        if not self.prompt_locked:
+            self.query_one("#prompt", HistoryInput).focus()
 
     def _switch_to_tab(self, tab_id: str) -> None:
         """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
         self.query_one("#center-tabs", TabbedContent).active = tab_id
+        self.active_tab = tab_id
         if self.agents.activate(tab_id):
             self._on_active_agent_changed()
 
@@ -961,7 +975,7 @@ class ChatApp(
             ac.action_hide()
             return
         prompt = self.query_one("#prompt", HistoryInput)
-        if prompt.disabled:
+        if self.prompt_locked:
             # 正在串流：取消並標記回填
             self.input_state.restore_input = True
             self.agent._cancelled = True

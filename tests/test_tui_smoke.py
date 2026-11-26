@@ -292,3 +292,49 @@ def test_think_toggle_via_cap_bar_click(app_factory) -> None:
             assert think.has_class("cap-think-on") is (not before)
 
     _run(app_factory, body)
+
+
+def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
+    """busy_tabs + active_tab 決定 prompt 鎖定；切 tab 自動鎖／解鎖，重疊工作要全部結束才解鎖。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from textual.widgets import TabbedContent
+
+        from widgets.input import HistoryInput
+
+        prompt = app.query_one("#prompt", HistoryInput)
+        tabs = app.query_one("#center-tabs", TabbedContent)
+
+        app.mark_busy("chat")
+        await pilot.pause()
+        assert app.prompt_locked and prompt.disabled and prompt.has_class("streaming")
+
+        # 切到檔案 tab：該 tab 沒在忙 → 解鎖
+        f = tmp_path / "a.txt"
+        f.write_text("hi", encoding="utf-8")
+        await app._open_file_tab(f).wait()  # @work：回傳 Worker
+        await pilot.pause()
+        assert app.active_tab != "chat"
+        assert not app.prompt_locked and not prompt.disabled
+
+        # 切回 chat → 再次鎖住
+        tabs.active = "chat"
+        await pilot.pause()
+        assert app.active_tab == "chat" and prompt.disabled
+
+        # 同一 tab 兩件工作：結束一件仍鎖，全部結束才解鎖並 focus
+        app.mark_busy("chat")
+        app.unmark_busy("chat")
+        await pilot.pause()
+        assert prompt.disabled
+        app.unmark_busy("chat")
+        await pilot.pause()
+        assert not prompt.disabled and not prompt.has_class("streaming")
+        assert prompt.has_focus
+        assert "❯" in str(prompt.border_title)
+
+        # 多 unmark 不會出錯
+        app.unmark_busy("chat")
+        assert app.busy_tabs == ()
+
+    _run(app_factory, body)

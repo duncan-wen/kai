@@ -12,7 +12,7 @@ from textual import work
 from textual.widgets import Static
 
 from core.config import BASH_TIMEOUT
-from widgets.input import HistoryInput
+from widgets.input import HistoryInput, PromptSpinner
 from widgets.sidebar import Sidebar
 from widgets.tree import FileTree
 
@@ -46,9 +46,11 @@ class BashMixin(_MixinBase):
             Static(f"[bold]$[/bold] {cmd}", markup=True, classes="user-bubble")
         )
         msgs.scroll_end(animate=False)
-        prompt.disabled = True
-        prompt.add_class("streaming")
-        prompt.border_title = "⚙ 執行中..."
+        my_tab = self.active_tab
+        self.mark_busy(my_tab)
+        spinner = PromptSpinner(
+            prompt, "執行中…", visible=lambda: self.active_tab == my_tab
+        ).start()
         try:
             env = {
                 **os.environ,
@@ -107,10 +109,8 @@ class BashMixin(_MixinBase):
             )
         finally:
             msgs.scroll_end(animate=False)
-            prompt.disabled = False
-            prompt.remove_class("streaming")
-            prompt.show_idle_title()
-            prompt.focus()
+            spinner.stop()
+            self.unmark_busy(my_tab)
             self._bash_proc = None
             self._bash_worker = None
             self.query_one("#sidebar", Sidebar).refresh_git()

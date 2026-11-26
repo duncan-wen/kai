@@ -150,8 +150,11 @@ State that is drawn on screen lives in `ChatApp` reactives; widgets bind to it i
 | `debug_tools` | `HistoryInput.debug_mark` | prompt idle title / spinner debug mark |
 | `think_override` | (`watch_think_override` → `refresh_agent_view`) | thinking on/off |
 | `agent_view: AgentView` | `Sidebar.view`, `CapBar.view`; `ChatApp.watch_agent_view` | sidebar model + MCP, cap-bar think/vision, subtitle, prompt placeholder |
+| `active_tab` / `busy_tabs` → computed `prompt_locked` | `HistoryInput.locked` | prompt `disabled` + `.streaming` class; unlock restores idle title + focus |
 
 `AgentView` (`core/app_state.py`) is a frozen snapshot of the active agent. Agents are mutated in place by core code, so after changing anything it shows (model switch, nickname, tab switch, reload-agent, rename/resume/cd, MCP ready) call `self.refresh_agent_view()` — equal snapshots don't trigger redraws. Don't write to `#sb-model` / `#cap-think` / `sub_title` / prompt `border_title` directly.
+
+Long-running work in a tab (streaming, agent dispatch, greeting, `/create-agent`, `!bash`) wraps itself in `self.mark_busy(tab_id)` … `finally: self.unmark_busy(tab_id)` and gives its `PromptSpinner` `visible=lambda: self.active_tab == tab_id`. Never set `prompt.disabled` or the `streaming` class by hand; tab switches lock/unlock automatically. `busy_tabs` is a multiset (tuple), so overlapping jobs on one tab unlock only when all finish.
 
 ### `!` bash commands
 

@@ -53,7 +53,7 @@ class PromptSpinner:
             self._timer.stop()
             self._timer = None
         self.prompt._spinners.discard(self)
-        if self._is_visible():
+        if self._is_visible() and not self.prompt._spinner_showing():
             self.prompt.show_idle_title()
 
     def _is_visible(self) -> bool:
@@ -101,6 +101,8 @@ class HistoryInput(Input):
 
     debug_mark: reactive[bool] = reactive(False, init=False)
     """工具除錯模式；ChatApp 用 data_bind 綁到 ChatApp.debug_tools。"""
+    locked: reactive[bool] = reactive(False, init=False)
+    """目前 tab 有工作在跑（串流、bash…）；ChatApp 綁到 ChatApp.prompt_locked。"""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -124,9 +126,20 @@ class HistoryInput(Input):
     def on_mount(self) -> None:
         self.show_idle_title()
 
+    def _spinner_showing(self) -> bool:
+        return any(s._is_visible() for s in self._spinners)
+
     def watch_debug_mark(self) -> None:
-        if not self._spinners:
+        if not self._spinner_showing():
             self.show_idle_title()
+
+    def watch_locked(self, locked: bool) -> None:
+        self.disabled = locked
+        self.set_class(locked, "streaming")
+        if not locked:
+            if not self._spinner_showing():
+                self.show_idle_title()
+            self.focus()
 
     def set_base_placeholder(self, text: str) -> None:
         """設定一般 placeholder；正在顯示 ghost text 預測時只更新被暫存的那份。"""
