@@ -122,7 +122,7 @@ results = await asyncio.gather(
 | 工具 schema 硬寫在 `tools/`，不從 OpenAPI 自動產生 | 保持 schema 描述精準可控，避免模型混淆 |
 | 用 `Pydantic BaseModel` 做入參型別檢查 | 防止模型傳入畸形參數造成 crash |
 | `tenacity` exponential backoff 搜尋重試 | 增加魯棒性，搜尋服務不穩時自動重試 |
-| 結果長度控制（`budget_results`, `_trim_tool_result`） | 避免工具結果撐爆 context window |
+| 結果長度控制（`budget_results`, `trim_tool_result`） | 避免工具結果撐爆 context window |
 
 ---
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import Callable
 
-from core.model_stream import AssistantStep, CancelToken, Delta, ToolCall
+from core.model_stream import AssistantStep, CancelToken, Delta, ToolCall, Usage
 
 
 @dataclass
@@ -39,7 +40,13 @@ def tool_step(*calls: tuple[str, str | dict], text: str = "", **kw) -> Scripted:
     return Scripted(
         chunks=[text] if text else [],
         tool_calls=[
-            ToolCall(id=f"c{i}", name=name, arguments=args)
+            ToolCall(
+                id=f"c{i}",
+                name=name,
+                arguments=args
+                if isinstance(args, str)
+                else json.dumps(args, ensure_ascii=False),
+            )
             for i, (name, args) in enumerate(calls)
         ],
         **kw,
@@ -78,6 +85,5 @@ class FakeModel:
             text="".join(sent),
             thinking=item.thinking,
             tool_calls=list(item.tool_calls),
-            gen_tokens=item.gen_tokens,
-            prompt_tokens=item.prompt_tokens,
+            usage=Usage(gen_tokens=item.gen_tokens, prompt_tokens=item.prompt_tokens),
         )

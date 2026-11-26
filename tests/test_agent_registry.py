@@ -82,8 +82,8 @@ def test_agent_tab_can_be_found_by_object_and_by_agent_dir(registry, make_agent)
 
     assert registry.tab_id_of(writer) == tid
     assert registry.tab_id_of(registry.main) == AgentRegistry.MAIN_ID
-    assert registry.find_by_dir(writer._agent_dir) == tid
-    assert registry.find_by_dir(writer._agent_dir.parent / "nobody") is None
+    assert registry.find_by_dir(writer.agent_dir) == tid
+    assert registry.find_by_dir(writer.agent_dir.parent / "nobody") is None
 
 
 @pytest.fixture

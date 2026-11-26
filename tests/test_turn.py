@@ -79,7 +79,7 @@ def test_plain_reply_commits_and_streams(make_agent):
     assert done.reason == "complete"
     assert done.reply == "你好"
     assert done.prediction == "猜你想問"
-    assert done.stats.gen_tokens == 7
+    assert done.stats.usage.gen_tokens == 7
     assert events[-1] is done
     tokens = [e for e in events if isinstance(e, Token)]
     assert [t.text for t in tokens] == ["你", "你好", "你好"]
@@ -250,6 +250,8 @@ def test_cancel_during_tools_waits_for_batch(make_agent):
 
     assert done.reason == "cancelled"
     assert sorted(finished) == ["a", "b"]  # 這批跑完才停
+    # 已經跑完的工具照樣回報（可能有副作用，UI 要看得到）
+    assert [e.args["name"] for e in events if isinstance(e, ToolEvent)] == ["a", "b"]
     assert len(agent.model_stream.calls) == 1
     assert non_system(agent) == []
 
@@ -293,7 +295,35 @@ def test_overflow_twice_gives_error(make_agent):
 
     assert done.reason == "error"
     assert done.error.kind == "overflow"
+    assert "壓縮後仍失敗" in done.error.message
     assert log == ["compact"]
+
+
+def test_overflow_after_tools_does_not_rerun_them(make_agent):
+    runs: list[str] = []
+
+    async def side_effect(x: str) -> str:
+        runs.append(x)
+        return "done"
+
+    agent = make_agent(
+        [
+            tool_step(("side_effect", {"x": "1"})),
+            RuntimeError("context length exceeded"),
+            reply("好"),
+        ]
+    )
+    agent.tools_map["side_effect"] = side_effect
+    log: list = []
+    _fake_compact(agent, log)
+    done, events = run(agent, TurnRequest(user("做事")))
+
+    assert done.reason == "complete"
+    assert runs == ["1"]  # 重試接著原本的進度，不重跑工具
+    assert len([e for e in events if isinstance(e, ToolEvent)]) == 1
+    retry = agent.model_stream.calls[2].messages
+    assert retry[-1]["role"] == "tool"
+    assert retry[-3] == user("做事")
 
 
 def test_overflow_without_compact_backend(make_agent):
@@ -301,6 +331,8 @@ def test_overflow_without_compact_backend(make_agent):
     agent.compact_available = lambda: False
     done, _ = run(agent, TurnRequest(user()))
     assert done.error.kind == "overflow"
+    assert "沒有可用的壓縮後端" in done.error.message
+    assert "壓縮後仍失敗" not in done.error.message
 
 
 def test_model_errors_become_done(make_agent):
@@ -334,7 +366,7 @@ def test_persist_none_then_commit(make_agent):
     agent = make_agent([reply("答")])
     done, _ = run(agent, TurnRequest(user("問"), persist="none"))
     assert non_system(agent) == []
-    agent.commit(list(done.new_messages))
+    asyncio.run(agent.commit(list(done.new_messages)))
     assert non_system(agent) == [user("問"), {"role": "assistant", "content": "答"}]
 
 

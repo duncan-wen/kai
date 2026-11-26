@@ -144,7 +144,7 @@ class SessionMixin(_MixinBase):
 
         每次依 history 檔路徑重建：狀態都在磁碟上，/cd 後自然對到新目錄。
         """
-        return SessionStore((agent or self.agent)._history_file)
+        return SessionStore((agent or self.agent).history_file)
 
     def _do_rename(self, arg: str) -> None:
         store = self._session_store()

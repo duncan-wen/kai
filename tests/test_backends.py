@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from core.backends import ToolCallAccumulator, to_ollama_messages, to_openai_messages
 from core.model_stream import ToolCall
 
-TC = ToolCall(id="c0", name="echo", arguments={"text": "hi"})
+TC = ToolCall(id="c0", name="echo", arguments='{"text": "hi"}')
 NEUTRAL = [
     {"role": "system", "content": "sys"},
     {"role": "user", "content": "q"},

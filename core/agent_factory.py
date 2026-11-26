@@ -71,28 +71,18 @@ DESIGN_FULL_PROMPT = _DESIGN_BASE
 
 async def _call_backend(design_model: str, messages: list[dict]) -> str:
     """直接呼叫 ollama / openai-compat backend，回傳原始文字。"""
-    import core.config as _cfg
+    from core.backends import ollama_client, openai_client
     from core.models import get_profile
 
     profile = get_profile(design_model)
     if profile.backend == "ollama":
-        import ollama
-
-        resp = await ollama.AsyncClient().chat(model=profile.name, messages=messages)
+        resp = await ollama_client().chat(model=profile.name, messages=messages)
         return resp.message.content or ""
-    from openai import AsyncOpenAI
-
-    if profile.backend == "gemini":
-        client = AsyncOpenAI(
-            api_key=_cfg.GEMINI_API_KEY,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-    elif profile.backend == "deepseek":
-        client = AsyncOpenAI(
-            api_key=_cfg.DEEPSEEK_API_KEY, base_url="https://api.deepseek.com"
-        )
-    else:
+    if profile.backend not in ("gemini", "deepseek"):
         raise ValueError(f"未知 backend：{profile.backend!r}，請確認 REGISTRY 設定")
+    client = openai_client(profile.backend)
+    if client is None:
+        raise RuntimeError(f"{profile.backend} 未設定 API key")
     resp = await client.chat.completions.create(model=profile.name, messages=messages)
     return resp.choices[0].message.content or ""
 

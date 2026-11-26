@@ -74,7 +74,7 @@ class Agent:
             str
         ] = []  # 此 agent 可查的 Dify KB ID 清單（空 = 不啟用 RAG）
         self._dify_table: str = ""  # fetch_dify_datasets
-        self._chat_lock: asyncio.Lock = asyncio.Lock()  # 同一個 agent 的 turn 依序執行
+        self.turn_lock: asyncio.Lock = asyncio.Lock()  # 同一個 agent 的 turn 依序執行
         # app-level tools（由 ChatApp._inject_app_tools 注入，只有 main agent 有）
         self.extra_tools: list[dict] = []
         self.extra_tools_map: dict = {}
@@ -338,11 +338,24 @@ class Agent:
         tools.extend(self.extra_tools)
         return tools
 
-    def commit(self, messages: list[dict]) -> None:
-        """把 turn 產生的訊息寫進 history（rotate 後存檔）。"""
+    async def commit(self, messages: list[dict]) -> None:
+        """把 turn 產生的訊息寫進 history（rotate 後存檔；寫檔在 thread 裡做）。"""
         self.history.extend(messages)
         self._rotate_history()
-        self.save_history()
+        payload = self._history_payload()
+        await asyncio.to_thread(self._write_history, payload)
+
+    async def prepare_turn(self) -> None:
+        """turn 開始前：抓 Dify dataset 清單、重建 system prompt（讀 notes / skills，丟 thread）。"""
+        if self.datasets:
+            from .tools.dify import fetch_dify_datasets
+
+            self._dify_table = await fetch_dify_datasets(self.datasets)
+        await asyncio.to_thread(self._rebuild_system_prompt)
+
+    def messages_for(self, user_msg: dict) -> list[dict]:
+        """這個 turn 要送給模型的訊息：裁切過的 history + 新的 user 訊息。"""
+        return self._trim_history(self.history + [user_msg])
 
     def apply_definition(self, defn: "AgentDefinition") -> list[str]:
         """把 agent definition 套用到這個 Agent 上（開啟與 reload 共用）。
@@ -380,6 +393,27 @@ class Agent:
             self.mcp_context = ""
         self._rebuild_system_prompt()
         return changes
+
+    @property
+    def agent_dir(self) -> "Path | None":
+        """agent 專屬目錄；main agent 為 None（用 cwd/.kai）。"""
+        return self._agent_dir
+
+    @property
+    def history_file(self) -> Path:
+        return self._history_file
+
+    @property
+    def system_prompt(self) -> str:
+        """目前的 system message 內容（沒有就是空字串）。"""
+        return next(
+            (
+                str(m.get("content") or "")
+                for m in self.history
+                if m.get("role") == "system"
+            ),
+            "",
+        )
 
     @property
     def display_name(self) -> str:
@@ -436,12 +470,17 @@ class Agent:
         self._rebuild_system_prompt()
         self._load_history()
 
-    def save_history(self):
+    def save_history(self) -> None:
         """將對話歷史寫入 _history_file，只存最近 history_keep 個 pair。"""
+        self._write_history(self._history_payload())
+
+    def _history_payload(self) -> list[dict]:
         keep = self.history_keep if self.history_keep else HISTORY_KEEP
         system = [m for m in self.history if m["role"] == "system"]
         rest = [m for m in self.history if m["role"] != "system"]
-        to_save = system + rest[-(keep * 2) :]
+        return system + rest[-(keep * 2) :]
+
+    def _write_history(self, to_save: list[dict]) -> None:
         try:
             self._history_file.parent.mkdir(parents=True, exist_ok=True)
             self._history_file.write_text(
@@ -539,7 +578,7 @@ class Agent:
         kept = system + rest[-(keep * 2) :]
         return [{k: v for k, v in m.items() if not k.startswith("_")} for m in kept]
 
-    def _trim_tool_result(self, content: str) -> str:
+    def trim_tool_result(self, content: str) -> str:
         """HTML 去標簽；超長截斷。"""
         if re.search(r"<html|<!doctype", content[:200], re.IGNORECASE):
             content = re.sub(r"<[^>]+>", " ", content)

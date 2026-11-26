@@ -1,7 +1,7 @@
 """core.turn — 一個 Turn：從 user 訊息送出到最終回覆（或結束原因）。
 
 進入點 `run_turn(agent, request, sink, cancel)`：
-- 取得 `agent._chat_lock`（同一個 agent 的 turn 依序執行），整輪包在 `agent.turn_scope()`
+- 取得 `agent.turn_lock`（同一個 agent 的 turn 依序執行），整輪包在 `agent.turn_scope()`
 - 跑 tool calling loop：每個 Step 透過 `agent.model_stream`（`core.model_stream` seam）呼叫模型
 - 過程以型別化事件送進 `sink`；結束時送出並回傳同一個 `Done`
 - history 只在成功結束時一次 commit；錯誤 / 取消不動 history
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import re
 import time
@@ -27,12 +28,14 @@ from .langfuse_client import (
     trace,
     user_message,
 )
-from .model_stream import AssistantStep, CancelToken, Delta, QuotaError
+from .model_stream import AssistantStep, CancelToken, Delta, QuotaError, Usage
 from .session_store import SessionStore
 from .tool_log import log_tool_call, log_turn_start
 from .tools import ToolResult, run_tool
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .agent import Agent
     from .model_stream import ToolCall
 
@@ -45,7 +48,7 @@ class TurnRequest:
     """一個 turn 的輸入。
 
     persist：`all` 存 user + 回覆；`reply_only` 只存回覆（greeting 的觸發訊息不存）；
-    `none` 都不存（`/ask`，之後可用 `agent.commit(done.new_messages)` 補存）。
+    `none` 都不存（`/ask`，之後可用 `await agent.commit(done.new_messages)` 補存）。
     think：None 跟模型預設（`profile.supports_thinking`）。
     """
 
@@ -96,12 +99,11 @@ class Compacted:
 
 @dataclass(frozen=True)
 class TurnStats:
+    """整個 turn 的統計。usage：gen_tokens 是各 step 加總，其餘取最後一個 step。"""
+
     elapsed: float = 0.0
     thinking_s: float | None = None
-    gen_tokens: int | None = None
-    prompt_tokens: int | None = None
-    num_ctx: int | None = None  # 只有固定 context window 的後端（Ollama）才有
-    cache_hit: int | None = None
+    usage: Usage = field(default_factory=Usage)
 
 
 ErrorKind = Literal["overflow", "timeout", "quota", "other"]
@@ -195,8 +197,6 @@ def classify_error(e: BaseException) -> ErrorKind:
 
 def parse_tool_args(tc: "ToolCall") -> tuple[dict, str | None]:
     """工具參數 → (args, 錯誤訊息)。空字串視為無參數。"""
-    if isinstance(tc.arguments, dict):
-        return dict(tc.arguments), None
     try:
         parsed = json.loads(tc.arguments or "{}")
     except json.JSONDecodeError as e:
@@ -228,11 +228,11 @@ class _Turn:
         self.t0 = time.perf_counter()
         self.steps = 0
         self.thinking_s = 0.0
-        self.gen_tokens: int | None = None
-        self.prompt_tokens: int | None = None
-        self.cache_hit: int | None = None
-        self.num_ctx: int | None = None
+        self.usage = Usage()
         self.tool_log: list[str] = []
+        # 本輪已完成的 assistant(tool_calls) + tool 訊息；overflow 重試時接著用，不重跑工具
+        self.progress: list[dict] = []
+        self.tool_rounds = 0
         self.think = (
             request.think
             if request.think is not None
@@ -245,21 +245,18 @@ class _Turn:
         stats = TurnStats(
             elapsed=time.perf_counter() - self.t0,
             thinking_s=self.thinking_s or None,
-            gen_tokens=self.gen_tokens,
-            prompt_tokens=self.prompt_tokens,
-            num_ctx=self.num_ctx,
-            cache_hit=self.cache_hit,
+            usage=dataclasses.replace(self.usage),
         )
         return Done(reason=reason, stats=stats, **kw)
 
-    def _finish(
+    async def _finish(
         self, reason: DoneReason, reply: str, asst: dict, prediction: str = ""
     ) -> Done:
         new = (self.request.user_msg, asst)
         if self.request.persist == "all":
-            self.agent.commit(list(new))
+            await self.agent.commit(list(new))
         elif self.request.persist == "reply_only":
-            self.agent.commit([asst])
+            await self.agent.commit([asst])
         return self._done(reason, reply=reply, prediction=prediction, new_messages=new)
 
     # ── 主流程 ──
@@ -272,12 +269,8 @@ class _Turn:
                 "error",
                 error=TurnError("other", f"{agent.profile.name} 不支援圖片輸入"),
             )
-        if agent.datasets:
-            from .tools.dify import fetch_dify_datasets
-
-            agent._dify_table = await fetch_dify_datasets(agent.datasets)
-        agent._rebuild_system_prompt()
-        log_turn_start(len(agent.history) + 1, agent._agent_dir)
+        await agent.prepare_turn()
+        log_turn_start(len(agent.history) + 1, agent.agent_dir)
 
         compacted = False
         while True:
@@ -286,25 +279,37 @@ class _Turn:
             except _StepFailed as f:
                 kind = classify_error(f.cause)
                 logger.error(f"模型串流錯誤（{kind}）：{f.cause}")
-                if kind == "overflow" and not compacted and agent.compact_available():
-                    compacted = True
-                    await self.sink(Compacting())
-                    try:
-                        await agent.compact_history()
-                    except Exception as e:
-                        logger.exception("autocompact 失敗")
-                        return self._done(
-                            "error", error=TurnError("other", f"壓縮失敗：{e}")
-                        )
-                    await self.sink(Compacted())
-                    continue
-                return self._done("error", error=TurnError(kind, str(f.cause)))
+                if kind != "overflow":
+                    return self._done("error", error=TurnError(kind, str(f.cause)))
+                if compacted:
+                    return self._done(
+                        "error", error=TurnError(kind, f"壓縮後仍失敗：{f.cause}")
+                    )
+                if not agent.compact_available():
+                    return self._done(
+                        "error",
+                        error=TurnError(
+                            kind,
+                            "沒有可用的壓縮後端（需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY）"
+                            f"：{f.cause}",
+                        ),
+                    )
+                compacted = True
+                await self.sink(Compacting())
+                try:
+                    await agent.compact_history()
+                except Exception as e:
+                    logger.exception("autocompact 失敗")
+                    return self._done(
+                        "error", error=TurnError("other", f"壓縮失敗：{e}")
+                    )
+                await self.sink(Compacted())
 
     async def _loop(self) -> Done:
         agent = self.agent
         model = agent.model_stream
-        messages = agent._trim_history(agent.history + [self.request.user_msg])
-        tool_rounds = 0
+        # 重試時 history 已被壓縮，但本輪做完的工具步驟（progress）照樣接上
+        messages = agent.messages_for(self.request.user_msg) + self.progress
         while True:
             step = await self._step(messages)
             if self.cancel.cancelled:
@@ -320,30 +325,33 @@ class _Turn:
                     return self._done("empty")
                 reply, prediction = split_prediction(step.text)
                 asst["content"] = reply
-                return self._finish("complete", reply, asst, prediction)
+                return await self._finish("complete", reply, asst, prediction)
 
             asst["tool_calls"] = step.tool_calls
-            messages.append(asst)
+            round_msgs = [asst]
             results = await asyncio.gather(
                 *[self._call_tool(tc) for tc in step.tool_calls]
             )
-            if self.cancel.cancelled:
-                return self._done("cancelled")
+            # 取消時工具也已經跑完（可能有副作用）：照樣記 log、送 ToolEvent 再停
             for tc, (args, tr) in zip(step.tool_calls, results):
-                log_tool_call(tr.fn_name, args, tr.output, agent._agent_dir)
+                log_tool_call(tr.fn_name, args, tr.output, agent.agent_dir)
                 await self.sink(ToolEvent(tc.name, args, tr))
                 self.tool_log.append(tc.name)
-                messages.append(
+                round_msgs.append(
                     {
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "name": tc.name,
-                        "content": agent._trim_tool_result(tr.output),
+                        "content": agent.trim_tool_result(tr.output),
                     }
                 )
+            if self.cancel.cancelled:
+                return self._done("cancelled")
+            messages.extend(round_msgs)
+            self.progress.extend(round_msgs)
 
-            tool_rounds += 1
-            if tool_rounds >= _cfg.MAX_TOOL_CALLS:
+            self.tool_rounds += 1
+            if self.tool_rounds >= _cfg.MAX_TOOL_CALLS:
                 logger.warning(f"已達工具呼叫上限 {_cfg.MAX_TOOL_CALLS} 次，強制結束")
                 tools_str = "、".join(self.tool_log) or "（無）"
                 progress = (
@@ -351,7 +359,7 @@ class _Turn:
                     f"本輪依序呼叫的工具：{tools_str}\n"
                     "下次對話說「繼續」即可接續未完成的任務。"
                 )
-                return self._finish(
+                return await self._finish(
                     "tool_limit", progress, {"role": "assistant", "content": progress}
                 )
 
@@ -408,16 +416,17 @@ class _Turn:
 
         if thinking and not thinking_sent and not self.cancel.cancelled:
             await emit_thinking()
-        if step.gen_tokens is not None:
-            self.gen_tokens = (self.gen_tokens or 0) + step.gen_tokens
-        if step.prompt_tokens is not None:
-            self.prompt_tokens = step.prompt_tokens
-        self.cache_hit = step.cache_hit
-        self.num_ctx = step.num_ctx
+        u = step.usage
+        if u.gen_tokens is not None:
+            self.usage.gen_tokens = (self.usage.gen_tokens or 0) + u.gen_tokens
+        if u.prompt_tokens is not None:
+            self.usage.prompt_tokens = u.prompt_tokens
+        self.usage.cache_hit = u.cache_hit
+        self.usage.num_ctx = u.num_ctx
         logger.debug(
             f"step {self.steps}：{time.perf_counter() - t_step:.2f}s | "
-            f"生成 {step.gen_tokens} tokens，輸入 {step.prompt_tokens} tokens"
-            + (f"，cache hit {step.cache_hit}" if step.cache_hit is not None else "")
+            f"生成 {u.gen_tokens} tokens，輸入 {u.prompt_tokens} tokens"
+            + (f"，cache hit {u.cache_hit}" if u.cache_hit is not None else "")
         )
         return step
 
@@ -433,6 +442,11 @@ def _user_text(user_msg: dict) -> str:
     return str(content or "")
 
 
+def _session_ids(history_file: "Path") -> tuple[str, str]:
+    store = SessionStore(history_file)
+    return store.name, store.session_id
+
+
 async def run_turn(
     agent: "Agent",
     request: TurnRequest,
@@ -441,12 +455,13 @@ async def run_turn(
 ) -> Done:
     """跑一個 turn；`Done` 會送進 sink，也是回傳值。"""
     cancel = cancel or CancelToken()
-    async with agent._chat_lock:
+    async with agent.turn_lock:
         # 只在 Langfuse 啟用時才取 session ID（首次取用會在磁碟建立 .session_id）
-        store = (
-            SessionStore(agent._history_file) if get_langfuse() is not None else None
-        )
-        session_name = store.name if store else ""
+        session_name, session_id = "", None
+        if get_langfuse() is not None:
+            session_name, session_id = await asyncio.to_thread(
+                _session_ids, agent.history_file
+            )
         meta = {
             "model": agent.profile.name,
             "backend": agent.profile.backend,
@@ -457,7 +472,7 @@ async def run_turn(
         with agent.turn_scope():
             with trace(
                 name="chat-turn",
-                session_id=store.session_id if store else None,
+                session_id=session_id,
                 user_id=_cfg.USERNAME or None,
                 # Langfuse Sessions（Messages 視圖）只讀 trace 根節點的 input/output，
                 # 且必須是 {"role", "content"} 形狀才渲染得成對話泡泡。
@@ -466,17 +481,7 @@ async def run_turn(
             ) as span:
                 done = await turn.run()
                 if span is not None:
-                    sys_text = str(
-                        next(
-                            (
-                                m.get("content")
-                                for m in agent.history
-                                if m.get("role") == "system"
-                            ),
-                            "",
-                        )
-                        or ""
-                    )
+                    sys_text = agent.system_prompt
                     # metadata 一次給齊：SDK 的 update 是整批覆蓋，不能只給增量
                     span.update(
                         output=assistant_message(done.reply[:2000]),

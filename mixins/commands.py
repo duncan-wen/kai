@@ -70,7 +70,7 @@ class CommandsMixin(_MixinBase):
             return
         # 存入的 /ask 回答算新對話：session 不再是 resumed session
         self._session_store().mark_active()
-        self.agent.commit(self.input_state.last_ephemeral)
+        await self.agent.commit(self.input_state.last_ephemeral)
         self.input_state.last_ephemeral = None
         self.notify("已存入對話歷史", timeout=2)
 
@@ -87,7 +87,7 @@ class CommandsMixin(_MixinBase):
         if not arg:
             self._usage("/remember <要記住的內容>")
             return
-        notes_root = self.agent._agent_dir or Path(os.getcwd()) / ".kai"
+        notes_root = self.agent.agent_dir or Path(os.getcwd()) / ".kai"
         notes_root.mkdir(parents=True, exist_ok=True)
         notes_path = notes_root / "notes.md"
         existing = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""

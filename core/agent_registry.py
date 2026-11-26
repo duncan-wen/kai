@@ -55,7 +55,7 @@ class AgentRegistry:
     def find_by_dir(self, agent_dir: "Path") -> str | None:
         """已開啟同一個 agent 目錄的 tab id（/load-agent 去重用）。"""
         return next(
-            (tid for tid, a in self._tabs.items() if a._agent_dir == agent_dir), None
+            (tid for tid, a in self._tabs.items() if a.agent_dir == agent_dir), None
         )
 
     def find(self, query: str) -> str:
@@ -71,8 +71,8 @@ class AgentRegistry:
 
         def names(agent: "Agent") -> set[str]:
             result = {agent.display_name.lower()}
-            if agent._agent_dir:
-                result.add(agent._agent_dir.name.lower())
+            if agent.agent_dir:
+                result.add(agent.agent_dir.name.lower())
             return result
 
         exact = [tid for tid, a in self._tabs.items() if q in names(a)]
@@ -95,7 +95,7 @@ class AgentRegistry:
 
     def _label(self, tab_id: str) -> str:
         agent = self._tabs[tab_id]
-        dir_name = agent._agent_dir.name if agent._agent_dir else ""
+        dir_name = agent.agent_dir.name if agent.agent_dir else ""
         if dir_name and dir_name != agent.display_name:
             return f"{agent.display_name}（{dir_name}）"
         return agent.display_name

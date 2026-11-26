@@ -167,7 +167,7 @@ flowchart TB
     Factory["Agent Factory<br/>/create-agent"] -->|LLM 設計 config.json| Sub
 
     subgraph Core["core/：工具呼叫迴圈"]
-        Loop["Agent.chat<br/>串流 → 工具呼叫 → 再呼叫"]
+        Loop["run_turn<br/>串流 → 工具呼叫 → 再呼叫"]
         Dispatch["run_tool<br/>MCP 優先，其次內建工具"]
         Loop --> Dispatch
     end
