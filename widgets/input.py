@@ -8,6 +8,7 @@ from pathlib import Path
 
 from textual import events
 from textual.binding import Binding
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Input
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
@@ -19,6 +20,12 @@ from .utils import _IMAGE_EXTS
 
 
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# Playwright / WSLg 重設終端滑鼠追蹤時漏進 Input 的滑鼠事件殘渣。
+# Textual 吃掉 ESC 和 [，剩下的會被當成按鍵輸入：
+#   SGR 完整：ESC[<35;80;25M  →  <35;80;25M 或 35;80;25M
+#   SGR 片段：80;25M
+MOUSE_SEQ = re.compile(r"(?:\x1b\[?)?<?(?:\d+;)+\d+[Mm]")
 
 
 class PromptSpinner:
@@ -74,11 +81,18 @@ class PromptSpinner:
 
 
 class HistoryInput(Input):
-    """Input with Up/Down history navigation and Ctrl+Z undo.
+    """Input：長文字 / 多行貼上壓縮成 marker、Ctrl+Z undo、ghost text 預測。
 
-    Uses _on_key (runs before the binding system) to intercept up/down before
-    ScrollView's scroll_up/scroll_down bindings consume them.
+    Up/Down 在 _on_key（早於 binding 系統）攔下，避免被 ScrollView 的 scroll 綁定吃掉，
+    再以 `Navigate` 往上送；歷史清單由 PromptBar 持有。
     """
+
+    class Navigate(Message):
+        """要求切換輸入歷史：step=-1 往舊（Up），+1 往新（Down）。"""
+
+        def __init__(self, step: int) -> None:
+            super().__init__()
+            self.step = step
 
     BINDINGS = [
         Binding("tab", "apply_prediction", "Apply prediction", show=False),
@@ -170,9 +184,34 @@ class HistoryInput(Input):
         self.value = marker
         self.cursor_position = len(marker)
 
+    def recall(self, text: str) -> None:
+        """把一筆歷史放回輸入框；長文字或多行重新壓縮成 marker。"""
+        if (
+            len(text) > self._COMPRESS_THRESHOLD or "\n" in text
+        ) and not self._is_marker(text):
+            self._compress(text)
+        else:
+            self.value = text
+            self.cursor_position = len(text)
+
+    def take_submission(self, value: str) -> str:
+        """取出要送出的文字：把 marker 換回貼上的完整內容並清除壓縮狀態，去頭尾空白。"""
+        if self._multiline_paste is None:
+            return value.strip()
+        paste = self._multiline_paste
+        marker = self._multiline_marker or ""
+        self._multiline_paste = None
+        self._multiline_marker = None
+        if marker and marker in value:
+            return value.replace(marker, paste, 1).strip()
+        return paste
+
     # ── paste ──────────────────────────────────────────────────────────────────
 
     def on_paste(self, event: events.Paste) -> None:
+        if MOUSE_SEQ.search(event.text):
+            event.prevent_default()
+            return
         # 連續貼上：若整個 input 就是舊 marker，清空重來（取代語意，非累加）
         if self._multiline_paste is not None and self.value == self._multiline_marker:
             self._multiline_paste = None
@@ -274,11 +313,11 @@ class HistoryInput(Input):
         if event.key == "up":
             event.prevent_default()
             event.stop()
-            self.app.action_history_prev()  # type: ignore[attr-defined]
+            self.post_message(self.Navigate(-1))
         elif event.key == "down":
             event.prevent_default()
             event.stop()
-            self.app.action_history_next()  # type: ignore[attr-defined]
+            self.post_message(self.Navigate(1))
         elif event.key == "ctrl+z":
             event.prevent_default()
             event.stop()

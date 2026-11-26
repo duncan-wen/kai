@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from textual.worker import Worker
 
 from loguru import logger
-from textual import events, on, work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
@@ -22,7 +22,6 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
     Footer,
     Header,
-    Input,
     Static,
     TabbedContent,
     TabPane,
@@ -43,7 +42,6 @@ from mixins.mcp import MCPMixin
 from mixins.skills import SkillsMixin
 from mixins.session import SessionMixin
 from mixins.streaming import StreamingMixin
-from textual_fspicker import FileOpen, Filters
 from widgets.chat import (
     AIMessage,
     CapBar,
@@ -51,51 +49,14 @@ from widgets.chat import (
     FileViewer,
 )
 from widgets.commands import ChatCommands
-from widgets.input import ChatAutoComplete, HistoryInput
+from widgets.input import HistoryInput
+from widgets.prompt_bar import PromptBar
 from widgets.sidebar import ResizeHandle, Sidebar
 from widgets.tree import FileTree
 from widgets.utils import _IMAGE_EXTS
 
 logger.remove()
 # logger.add 在 main block 的 os.chdir 之後才真正加入，這裡只移除預設 handler
-
-PROMPT_HISTORY_FILE = Path(".kai/.prompt_history")
-# Mouse event debris that leaks into Input when Playwright/WSLg resets terminal mouse
-# tracking state. Textual consumes ESC and [ but the rest falls through as keystrokes:
-#   SGR full:    ESC[<35;80;25M  →  <35;80;25M  or  35;80;25M
-#   SGR partial: 80;25M
-# Pattern: optional ESC, optional [, optional <, then semicolon-separated numbers + M/m
-_MOUSE_SEQ = re.compile(r"(?:\x1b\[?)?<?(?:\d+;)+\d+[Mm]")
-
-
-def _load_prompt_history() -> list[str]:
-    """讀取 prompt_toolkit FileHistory 格式，回傳最舊→最新排列的清單。"""
-    if not PROMPT_HISTORY_FILE.exists():
-        return []
-    entries: list[str] = []
-    current: list[str] = []
-    for line in PROMPT_HISTORY_FILE.read_text(encoding="utf-8").splitlines():
-        if line.startswith("+"):
-            current.append(line[1:])
-        elif not line.strip() and current:
-            entries.append("\n".join(current))
-            current = []
-    if current:
-        entries.append("\n".join(current))
-    return entries
-
-
-def _append_prompt_history(text: str) -> None:
-    """將一筆輸入追加到 prompt_toolkit FileHistory 格式的檔案。"""
-    from datetime import datetime
-
-    lines = "\n".join(f"+{ln}" for ln in text.splitlines())
-    entry = f"# {datetime.now()}\n{lines}\n\n"
-    try:
-        with PROMPT_HISTORY_FILE.open("a", encoding="utf-8") as f:
-            f.write(entry)
-    except Exception as e:
-        logger.warning(f"寫入 prompt history 失敗：{e}")
 
 
 async def _fetch_db_schema(mcp: MCPClient) -> str:
@@ -174,7 +135,7 @@ class ChatApp(
     busy_tabs: reactive[tuple[str, ...]] = reactive((), init=False)
     """有工作在跑的 tab id；可重複（同一 tab 同時有兩件工作）。用 mark_busy / unmark_busy 改。"""
     prompt_locked: reactive[bool] = reactive(False, init=False)
-    """目前 tab 是否忙碌（compute_prompt_locked）；綁到 HistoryInput.locked。"""
+    """目前 tab 是否忙碌（compute_prompt_locked）；綁到 PromptBar.locked → HistoryInput.locked。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -198,7 +159,7 @@ class ChatApp(
         self._bash_proc: asyncio.subprocess.Process | None = None
         self._bash_worker: "Worker | None" = None  # type: ignore[name-defined]
         self.session = SessionState(prev_cwd=os.getcwd())
-        self.input_state = InputState(history=_load_prompt_history())
+        self.input_state = InputState()
         self.ui_state = UIState()
         self.set_reactive(ChatApp.debug_tools, _kai_cfg.DEBUG_TOOLS)
         self._mcp_initializing = True
@@ -224,12 +185,9 @@ class ChatApp(
                         )
             yield ResizeHandle("sidebar", id="sidebar-handle", right_anchor=True)
             yield Sidebar(id="sidebar").data_bind(view=ChatApp.agent_view)
-        with Horizontal(id="input-row"):
-            yield Static("📎", id="attach-btn", classes="attach-btn")
-            yield HistoryInput(id="prompt").data_bind(
-                debug_mark=ChatApp.debug_tools, locked=ChatApp.prompt_locked
-            )
-        yield ChatAutoComplete(target="#prompt", candidates=None)
+        yield PromptBar(id="input-row").data_bind(
+            debug_mark=ChatApp.debug_tools, locked=ChatApp.prompt_locked
+        )
         yield CapBar(id="cap-bar").data_bind(view=ChatApp.agent_view)
         yield Footer()
 
@@ -396,147 +354,9 @@ class ChatApp(
 
     # ── 輸入事件 ──────────────────────────────────────────────────────────────
 
-    def action_history_prev(self) -> None:
-        prompt = self.query_one("#prompt", HistoryInput)
-        if not prompt.has_focus or prompt.disabled:
-            return
-        ac = self.query_one(ChatAutoComplete)
-        if ac.display:
-            return
-        if not self.input_state.history:
-            return
-        if self.input_state.history_idx == -1:
-            self.input_state.history_draft = prompt.value
-        self.input_state.history_idx = min(
-            self.input_state.history_idx + 1, len(self.input_state.history) - 1
-        )
-        _hval = self.input_state.history[-(self.input_state.history_idx + 1)]
-        if (
-            len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval
-        ) and not prompt._is_marker(_hval):
-            prompt._compress(_hval)
-        else:
-            prompt.value = _hval
-            prompt.cursor_position = len(_hval)
-
-    def action_history_next(self) -> None:
-        prompt = self.query_one("#prompt", HistoryInput)
-        if not prompt.has_focus or prompt.disabled:
-            return
-        ac = self.query_one(ChatAutoComplete)
-        if ac.display:
-            return
-        if self.input_state.history_idx == -1:
-            return
-        self.input_state.history_idx -= 1
-        if self.input_state.history_idx == -1:
-            prompt.value = self.input_state.history_draft
-            prompt.cursor_position = len(prompt.value)
-        else:
-            _hval = self.input_state.history[-(self.input_state.history_idx + 1)]
-            if (
-                len(_hval) > prompt._COMPRESS_THRESHOLD or "\n" in _hval
-            ) and not prompt._is_marker(_hval):
-                prompt._compress(_hval)
-            else:
-                prompt.value = _hval
-                prompt.cursor_position = len(_hval)
-
-    @on(events.Click, "#attach-btn")
-    async def _on_attach_clicked(self, event: events.Click) -> None:
-        event.stop()
-
-        _filters = Filters(
-            (
-                "圖片",
-                lambda p: (
-                    p.suffix.lower()
-                    in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-                ),
-            ),
-            (
-                "文字",
-                lambda p: (
-                    p.suffix.lower()
-                    in {
-                        ".py",
-                        ".md",
-                        ".txt",
-                        ".json",
-                        ".yaml",
-                        ".yml",
-                        ".toml",
-                        ".ts",
-                        ".js",
-                        ".html",
-                        ".css",
-                    }
-                ),
-            ),
-            ("所有檔案", lambda p: True),
-        )
-
-        async def _on_attach(path) -> None:
-            if path:
-                from pathlib import Path as _Path
-
-                p = _Path(path)
-                prompt = self.query_one("#prompt", HistoryInput)
-                if p.suffix.lower() in {
-                    ".png",
-                    ".jpg",
-                    ".jpeg",
-                    ".gif",
-                    ".webp",
-                    ".bmp",
-                }:
-                    prompt.value = f"/image {p} "
-                else:
-                    cur = prompt.value
-                    insert = f"@{p} "
-                    if cur and not cur.endswith(" "):
-                        insert = " " + insert
-                    prompt.value = cur + insert
-                prompt.cursor_position = len(prompt.value)
-                prompt.focus()
-
-        self.push_screen(
-            FileOpen(os.getcwd(), title="選擇附件", filters=_filters),
-            callback=_on_attach,
-        )
-
-    def on_paste(self, event: events.Paste) -> None:
-        if _MOUSE_SEQ.search(event.text):
-            event.prevent_default()
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if _MOUSE_SEQ.search(event.value):
-            event.input.value = ""
-            event.input.cursor_position = 0
-
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        prompt = self.query_one("#prompt", HistoryInput)
-        if prompt._multiline_paste is not None:
-            paste = prompt._multiline_paste
-            marker = prompt._multiline_marker or ""
-            prompt._multiline_paste = None
-            prompt._multiline_marker = None
-            raw_value = event.value
-            if marker and marker in raw_value:
-                text = raw_value.replace(marker, paste, 1).strip()
-            else:
-                text = paste
-        else:
-            text = event.value.strip()
-        if not text:
-            return
-        event.input.clear()
-        if not self.input_state.history or self.input_state.history[-1] != text:
-            self.input_state.history.append(text)
-            _append_prompt_history(text)
-        self.input_state.history_idx = -1
-        self.input_state.history_draft = ""
-
+    async def on_prompt_bar_submitted(self, event: PromptBar.Submitted) -> None:
+        """輸入列送出：`!` → bash，`/` → slash 指令，其他展開 @檔案後送給 Agent。"""
+        text = event.text
         if text.startswith("!"):
             cmd = text[1:].strip()
             if cmd:
@@ -822,10 +642,7 @@ class ChatApp(
     def on_file_tree_file_chosen(self, event: FileTree.FileChosen) -> None:
         path = event.path
         if path.suffix.lower() in _IMAGE_EXTS:
-            prompt = self.query_one("#prompt", HistoryInput)
-            prompt.value = f"/image {path} "
-            prompt.cursor_position = len(prompt.value)
-            prompt.focus()
+            self.query_one(PromptBar).attach(path)
         else:
             self._open_file_tab(path)
 
@@ -965,12 +782,11 @@ class ChatApp(
 
     def action_cancel_stream(self) -> None:
         from textual.screen import ModalScreen
-        from widgets.input import ChatAutoComplete, HistoryInput
 
         if isinstance(self.screen, ModalScreen):
             self.screen.dismiss()
             return
-        ac = self.query_one(ChatAutoComplete)
+        ac = self.query_one(PromptBar).autocomplete
         if ac.display:
             ac.action_hide()
             return

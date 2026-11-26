@@ -12,7 +12,7 @@ asyncio 生命週期物件（_mcp_task、_bash_proc、_tts_future 等）
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -24,11 +24,8 @@ class SessionState:
 
 @dataclass
 class InputState:
-    """提示列輸入歷史、游標導航與暫存狀態。"""
+    """送出 / 取消串流之間的輸入暫存（輸入歷史由 widgets.prompt_bar.PromptBar 持有）。"""
 
-    history: list[str] = field(default_factory=list)
-    history_idx: int = -1
-    history_draft: str = ""
     last_send_text: str = ""
     restore_input: bool = False
     last_ephemeral: list[dict] | None = None

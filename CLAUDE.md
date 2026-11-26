@@ -55,6 +55,7 @@ mixins/             → ChatApp behaviour split into focused mixins (all inherit
   streaming.py      → StreamingMixin: _send worker, on_token, on_done, TTS playback (run_in_executor thread)
 widgets/
   input.py          → HistoryInput, ChatAutoComplete, PromptSpinner (border_title spinner)
+  prompt_bar.py     → PromptBar: input row (📎 + HistoryInput + autocomplete); owns prompt history, posts PromptBar.Submitted
   slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
   tree.py           → RightClickTree, TreeContextMenu, FileTree
   sidebar.py        → ResizeHandle, Sidebar
@@ -80,7 +81,7 @@ widgets/
 │            │            │  (syntax highlight)  │ context   │
 │            ├────────────┴──────────────────────┤ git       │
 │            │  cap-bar (Think / MCP badges)     │ MCP tools │
-│            │  #prompt (HistoryInput)           │           │
+│            │  PromptBar: 📎 #prompt (History…) │           │
 └────────────┴───────────────────────────────────┴───────────┘
 ```
 
@@ -89,7 +90,8 @@ widgets/
 | Widget | File | Purpose |
 |--------|------|---------|
 | `ChatApp` | app.py | root App, composes all mixins, event handlers |
-| `HistoryInput` | widgets/input.py | single-line input with Up/Down history, Ctrl+Z undo, multiline paste intercept |
+| `PromptBar` | widgets/prompt_bar.py | input row: 📎 attach button + `HistoryInput`; owns Up/Down history (`.kai/.prompt_history`), marker expansion, mouse-debris filter; mounts `ChatAutoComplete` on the screen; posts `PromptBar.Submitted(text)` — `ChatApp.on_prompt_bar_submitted` only dispatches (`!` / `/` / chat) |
+| `HistoryInput` | widgets/input.py | single-line input: long-text / multiline paste → marker, Ctrl+Z undo, ghost-text prediction; Up/Down post `HistoryInput.Navigate` to `PromptBar` |
 | `ChatAutoComplete` | widgets/input.py | slash command / path autocomplete |
 | `FileTree` | widgets/tree.py | lazy-loading dir tree; double-click opens file tab; Ctrl+click / Space multi-select for batch delete; 2s deep fs watcher |
 | `RightClickTree` | widgets/tree.py | Tree subclass; intercepts right-click + Ctrl+click; Space/Ctrl+A/Escape key bindings |
@@ -139,6 +141,8 @@ widgets/
 
 Adding a slash command: write `async def _cmd_xxx(self, arg: str) -> None` in `mixins/commands.py` with `@slash("/xxx", "說明", needs_arg=..., presets=...)`. Prompt submit, autocomplete and the Ctrl+P palette all read the same table; `needs_arg=True` makes the palette fill the prompt instead of running. Don't add `if cmd == ...` branches to `on_input_submitted`.
 
+Prompt input reaches the App only as `PromptBar.Submitted(text)` (marker already expanded, history already recorded). Don't handle `Input.Submitted` on the App or read `HistoryInput`'s `_multiline_*` fields from outside; to put text into the prompt use `PromptBar.attach(path)` or set `prompt.value`.
+
 Prompt spinner: use `PromptSpinner(prompt, label, visible=...).start()` and `stop()` in `finally`; change `spinner.label` to update the phase text. `stop()` restores the idle title itself. Don't hand-roll `set_interval` tick closures.
 
 ### Reactive UI state
@@ -147,10 +151,10 @@ State that is drawn on screen lives in `ChatApp` reactives; widgets bind to it i
 
 | Reactive | Bound by | Drives |
 |----------|----------|--------|
-| `debug_tools` | `HistoryInput.debug_mark` | prompt idle title / spinner debug mark |
+| `debug_tools` | `PromptBar.debug_mark` → `HistoryInput.debug_mark` | prompt idle title / spinner debug mark |
 | `think_override` | (`watch_think_override` → `refresh_agent_view`) | thinking on/off |
 | `agent_view: AgentView` | `Sidebar.view`, `CapBar.view`; `ChatApp.watch_agent_view` | sidebar model + MCP, cap-bar think/vision, subtitle, prompt placeholder |
-| `active_tab` / `busy_tabs` → computed `prompt_locked` | `HistoryInput.locked` | prompt `disabled` + `.streaming` class; unlock restores idle title + focus |
+| `active_tab` / `busy_tabs` → computed `prompt_locked` | `PromptBar.locked` → `HistoryInput.locked` | prompt `disabled` + `.streaming` class; unlock restores idle title + focus |
 
 `AgentView` (`core/app_state.py`) is a frozen snapshot of the active agent. Agents are mutated in place by core code, so after changing anything it shows (model switch, nickname, tab switch, reload-agent, rename/resume/cd, MCP ready) call `self.refresh_agent_view()` — equal snapshots don't trigger redraws. Don't write to `#sb-model` / `#cap-think` / `sub_title` / prompt `border_title` directly.
 
@@ -226,7 +230,7 @@ All archive lifecycle lives in `core/session_store.py` (`SessionStore(history_fi
 When pasting multiline text into the prompt:
 - Intercepts in `on_paste`; shows compact `[N 行] preview…` marker in input
 - If pasted from `FileViewer` copy, auto-wraps with ` ```lang filename:lines` context
-- On submit, replaces marker with full content while preserving any surrounding typed text
+- On submit, `PromptBar` calls `HistoryInput.take_submission()`, which replaces the marker with the full content while preserving any surrounding typed text
 
 ### Clipboard (WSL)
 

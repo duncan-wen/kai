@@ -16,13 +16,12 @@ from textual.pilot import Pilot
 
 @pytest.fixture
 def app_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """在暫存目錄建立 ChatApp；停用 MCP 與 prompt history 檔案。"""
+    """在暫存目錄建立 ChatApp；停用 MCP。prompt history 寫在暫存目錄的 .kai/ 下。"""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".kai").mkdir()
     import app as app_module
 
     monkeypatch.setattr(app_module, "load_mcp_servers", lambda: {})
-    monkeypatch.setattr(app_module, "_append_prompt_history", lambda text: None)
 
     def _make():
         return app_module.ChatApp()
@@ -336,5 +335,130 @@ def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
         # 多 unmark 不會出錯
         app.unmark_busy("chat")
         assert app.busy_tabs == ()
+
+    _run(app_factory, body)
+
+
+# ── PromptBar ───────────────────────────────────────────────────────────────
+
+
+def test_prompt_history_navigation(app_factory, tmp_path: Path) -> None:
+    """送出寫進歷史（重複的不重記、會存檔）；Up/Down 走歷史，走回底還原草稿。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.prompt_bar import PromptBar, load_prompt_history
+
+        bar = app.query_one(PromptBar)
+        prompt = bar.prompt
+        await _submit(app, pilot, "/greeting off")
+        await _submit(app, pilot, "/greeting on")
+        await _submit(app, pilot, "/greeting on")
+        assert bar.history[-2:] == ["/greeting off", "/greeting on"]
+        assert prompt.value == ""
+        saved = load_prompt_history(tmp_path / ".kai" / ".prompt_history")
+        assert saved == ["/greeting off", "/greeting on"]
+
+        prompt.value = "草稿"
+        prompt.focus()
+        await pilot.press("up")
+        assert prompt.value == "/greeting on"
+        await pilot.press("up")
+        await pilot.press("up")  # 已到最舊，停住
+        assert prompt.value == "/greeting off"
+        await pilot.press("down")
+        assert prompt.value == "/greeting on"
+        await pilot.press("down")
+        assert prompt.value == "草稿"
+
+    _run(app_factory, body)
+
+
+def test_prompt_multiline_paste_expands_on_submit(app_factory) -> None:
+    """多行貼上顯示成 marker；送出時換回完整內容，前後打的字保留。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from textual import events
+
+        from widgets.prompt_bar import PromptBar
+
+        bar = app.query_one(PromptBar)
+        prompt = bar.prompt
+        submitted: list[str] = []
+        # 一般文字會走 App 的分派 → _send；攔下來避免真的呼叫模型
+        app._send = lambda full, original_text=None: submitted.append(original_text)
+
+        prompt.focus()
+        prompt.value = "看這段 "
+        prompt.cursor_position = len(prompt.value)
+        app.post_message(events.Paste("第一行\n第二行\n第三行"))
+        await pilot.pause()
+        assert prompt.value.startswith("看這段 [3 行] 第一行")
+        prompt.value += " 怎麼樣"
+        await prompt.action_submit()
+        await pilot.pause()
+        assert submitted == ["看這段 第一行\n第二行\n第三行 怎麼樣"]
+        assert bar.history[-1] == submitted[0]
+        # 歷史叫回時重新壓縮成 marker
+        await pilot.press("up")
+        assert prompt._is_marker(prompt.value)
+
+    _run(app_factory, body)
+
+
+def test_prompt_filters_mouse_sequences(app_factory) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from textual import events
+
+        from widgets.prompt_bar import PromptBar
+
+        prompt = app.query_one(PromptBar).prompt
+        prompt.focus()
+        app.post_message(events.Paste("<35;80;25M"))
+        await pilot.pause()
+        assert prompt.value == ""
+        prompt.value = "80;25M"
+        await pilot.pause()
+        assert prompt.value == ""
+
+    _run(app_factory, body)
+
+
+def test_prompt_attach_inserts_path(app_factory, tmp_path: Path) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.prompt_bar import PromptBar
+
+        bar = app.query_one(PromptBar)
+        prompt = bar.prompt
+        prompt.value = "說明"
+        bar.attach(tmp_path / "a.py")
+        assert prompt.value == f"說明 @{tmp_path / 'a.py'} "
+        bar.attach(tmp_path / "b.png")
+        assert prompt.value == f"/image {tmp_path / 'b.png'} "
+        assert prompt.cursor_position == len(prompt.value)
+
+    _run(app_factory, body)
+
+
+def test_prompt_up_down_leave_open_dropdown_alone(app_factory) -> None:
+    """自動完成下拉開著時 Up 不切歷史；Esc 先關下拉。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.prompt_bar import PromptBar
+
+        bar = app.query_one(PromptBar)
+        await _submit(app, pilot, "/greeting on")
+        bar.prompt.focus()
+        await pilot.press("/", "m", "c")
+        await pilot.pause(0.3)
+        assert bar.autocomplete.display
+        assert (
+            bar.autocomplete.region.height > 3
+        )  # 掛在 screen 上，不被 3 行高的輸入列裁掉
+        await pilot.press("up")
+        assert bar.prompt.value == "/mc"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not bar.autocomplete.display
+        assert bar.prompt.value == "/mc"
 
     _run(app_factory, body)
