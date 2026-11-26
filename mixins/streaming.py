@@ -266,64 +266,8 @@ class StreamingMixin(_MixinBase):
             )
 
         except Exception as e:
-            err_str = str(e).lower()
-            _overflow_kws = (
-                "context",
-                "too long",
-                "window",
-                "kv cache",
-                "resource_exhausted",
-                "maximum context",
-                "exceeds the maximum",
-                "token limit",
-                "context length",
-                "prompt is too long",
-                "reduce the length",
-            )
-            if any(kw in err_str for kw in _overflow_kws) and (
-                agent._gemini or agent._deepseek
-            ):
-                logger.warning(f"context overflow，啟動 autocompact：{e}")
-                try:
-                    await msgs.mount(
-                        Static(
-                            "⚡ Context 已滿，正在用 Gemini 壓縮對話歷史…",
-                            classes="error-msg",
-                            markup=False,
-                        )
-                    )
-                    msgs.scroll_end(animate=False)
-                    await agent.compact_history()
-                    logger.info("autocompact 完成，重試對話")
-                    await msgs.mount(
-                        Static("✅ 已壓縮，繼續對話", classes="error-msg", markup=False)
-                    )
-                    msgs.scroll_end(animate=False)
-                    stream_msg = None
-                    buf.clear()
-                    retry_content = original_text if original_text else text
-                    retry_msg: dict = {"role": "user", "content": retry_content}
-                    if images:
-                        retry_msg["images"] = images
-                    await agent.chat(
-                        retry_msg,
-                        on_token=on_token,
-                        on_thinking=on_thinking,
-                        on_done=on_done,
-                        on_tool_call=on_tool_call,
-                        on_retry=on_retry,
-                    )
-                    if stream_msg and buf:
-                        await stream_msg.update_content("".join(buf), final=True)
-                except Exception as e2:
-                    logger.exception("compact + retry error")
-                    await msgs.mount(
-                        Static(
-                            f"❌ 壓縮後仍失敗：{e2}", classes="error-msg", markup=False
-                        )
-                    )
-                    msgs.scroll_end(animate=False)
-            elif isinstance(e, TimeoutError):
+            # context overflow 的 autocompact 已收進 core.turn
+            if isinstance(e, TimeoutError):
                 logger.error(f"Ollama stream timeout：{e}")
                 await msgs.mount(
                     Static(

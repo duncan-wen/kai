@@ -33,3 +33,13 @@ _Avoid_：agent config、agent（指磁碟上的設定時）
 **Agent tab**：
 顯示某個非 main 的 Agent 的 tab；一個 Agent definition 同時最多開一個 Agent tab。
 _Avoid_：subagent tab、agent（指 tab 時）
+
+## 對話流程
+
+**Turn**：
+從一則 user 訊息送出，到最終回覆（或結束原因）為止，包含中間所有 step。
+_Avoid_：round、一輪 chat（指程式概念時）
+
+**Step**：
+turn 裡的一次模型呼叫，產出文字和（或）tool calls。
+_Avoid_：generation（Langfuse 用語，只在 tracing 裡用）

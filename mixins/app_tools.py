@@ -392,7 +392,7 @@ class AppToolsMixin(_MixinBase):
             return f"重新載入失敗：{e}"
 
     async def _app_compact_history(self) -> str:
-        if not self.agent._gemini and not self.agent._deepseek:
+        if not self.agent.compact_available():
             return "需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能壓縮"
         try:
             summary = await self.agent.compact_history()

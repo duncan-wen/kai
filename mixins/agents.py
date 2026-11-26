@@ -256,13 +256,13 @@ class AgentsMixin(_MixinBase):
         # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
         self._session_store(agent).mark_active()
         try:
-            async with agent._chat_lock:
-                await agent.chat(
-                    {"role": "user", "content": full_content, "_inbox_sender": sender},
-                    on_token=on_token,
-                    on_done=on_done,
-                    on_tool_call=on_tool_call,
-                )
+            # run_turn 自己會取 agent._chat_lock
+            await agent.chat(
+                {"role": "user", "content": full_content, "_inbox_sender": sender},
+                on_token=on_token,
+                on_done=on_done,
+                on_tool_call=on_tool_call,
+            )
         except Exception as e:
             # @work 預設 exit_on_error：未接住的例外（API 額度用完、網路中斷）會讓整個 app 關閉
             logger.exception(f"[inbox] {agent.display_name} 處理失敗")
@@ -320,12 +320,11 @@ class AgentsMixin(_MixinBase):
                 await stream_msg.update_content(_display, final=True)
 
         try:
-            async with agent._chat_lock:
-                await agent.chat(
-                    {"role": "user", "content": greeting_prompt},
-                    on_token=on_token,
-                    on_done=on_done,
-                )
+            await agent.chat(
+                {"role": "user", "content": greeting_prompt},
+                on_token=on_token,
+                on_done=on_done,
+            )
             # 把 trigger user message 從 history 移除，只保留 assistant 開場白
             agent.history = [
                 m

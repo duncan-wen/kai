@@ -115,7 +115,7 @@ class SessionMixin(_MixinBase):
         self.notify(f"已切換至 {target}", severity="information")
 
     async def action_compact(self) -> None:
-        if not self.agent._gemini and not self.agent._deepseek:
+        if not self.agent.compact_available():
             self.notify(
                 "需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能使用 compact",
                 severity="warning",
