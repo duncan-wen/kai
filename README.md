@@ -121,7 +121,8 @@ agents/
 | `gemma4:e2b` / `gemma4:e4b` | ✓ | ✓ | ✓ | Ollama |
 | `gemini-2.0-flash` | — | ✓ | ✓ | Gemini API |
 | `gemini-2.5-flash` / `gemini-2.5-pro` | ✓ | ✓ | ✓ | Gemini API |
-| `deepseek-flash` / `deepseek-v4-pro` | ✓ | — | ✓ | DeepSeek API |
+| `deepseek-flash` | ✓ | ✓ | ✓ | DeepSeek API |
+| `deepseek-v4-pro` | ✓ | — | ✓ | DeepSeek API |
 
 完整清單與新增方式見 `core/models.py`。執行中用 `/model <name>` 切換。
 

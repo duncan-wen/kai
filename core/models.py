@@ -74,7 +74,11 @@ REGISTRY: dict[str, ModelProfile] = {
     "deepseek-flash": ModelProfile(
         "deepseek-flash",
         supports_thinking=True,
-        supports_vision=False,
+        # deepseek-flash（DeepSeek-V4.1-Flash）支援圖片輸入，走 OpenAI 相容的
+        # content array（text + image_url base64 data URL），格式與
+        # backends._to_openai_messages 產出的完全一致。
+        # 注意 deepseek-v4-pro 不支援 Vision，別跟著改。
+        supports_vision=True,
         supports_tools=True,
         backend="deepseek",
     ),
