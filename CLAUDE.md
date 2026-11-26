@@ -32,10 +32,12 @@ Single entry point (`app.py`) on top of a UI-independent core:
 ```
 app.py              → Textual TUI; ChatApp composes all mixins
 core/
-  agent.py          → Agent class: history, streaming, tool-call loop
+  agent.py          → Agent class: history, system prompt, model switch, tool schemas, commit
+  turn.py           → run_turn: the tool-call loop as typed events (ThinkingDone / Token / ToolEvent / Done …)
+  model_stream.py   → ModelStream seam: CancelToken, Delta, ToolCall, AssistantStep, make_model_stream
   agent_factory.py  → /create-agent, /load-agent, /list-agents logic (AI-based agent design)
   agent_registry.py → AgentRegistry: sole owner of main agent + agent tabs (tab ids, active agent, name lookup, MCP distribution); ChatApp.agent = agents.active
-  backends.py       → stream_ollama / stream_openai_compat (backend-specific streaming)
+  backends.py       → OllamaStream / OpenAICompatStream adapters (wire format, lazy SDK clients, Langfuse generation)
   app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState) + AgentView display snapshot; agent tabs live in AgentRegistry, not here
   session_store.py  → SessionStore: /cls, /resume, session naming, archive list/rename/delete (disk-only state)
   tools/            → built-in tools: web.py (web_search / fetch_urls), bash.py (bash_exec), dify.py (RAG), dispatch.py (run_tool)
@@ -255,15 +257,20 @@ When pasting multiline text into the prompt:
 
 ## Agent (`core/agent.py`)
 
-### Tool calling loop (`Agent.chat`)
+### Turn (`core/turn.py`)
 
-1. Stream Ollama/Gemini response; collect `msg.thinking`, `msg.content`, `msg.tool_calls`
-2. If `tool_calls` present → `asyncio.gather` all tools concurrently → append `tool` messages → repeat
-3. Loop exits when model returns no tool calls or `MAX_TOOL_CALLS` is reached
-4. `save_history()` is called after every turn
-5. `reset_history()` clears and reloads `history.json` from current cwd (used on directory change)
+`run_turn(agent, TurnRequest(user_msg, persist, think), sink, cancel) -> Done` runs one turn:
 
-Actual streaming is delegated to `core/backends.py`: `stream_ollama` for Ollama models, `stream_openai_compat` for OpenAI-compatible endpoints (Gemini, etc.).
+1. Takes `agent._chat_lock` and `agent.turn_scope()` (a mid-turn `switch_model` applies after the turn)
+2. Each step calls `agent.model_stream.step(...)`; tool calls run concurrently, results go back as `tool` messages
+3. Events go to `sink`: `ThinkingDone`, `Token` (text already stripped of `<next>`), `StepReset`, `ToolEvent`, `Compacting` / `Compacted`, then exactly one `Done(reason, reply, stats, prediction, error, new_messages)`
+4. History is committed once at the end (`persist`: `all` / `reply_only` / `none`); errors and cancels leave it untouched
+5. Model/backend errors never raise — they become `Done(reason="error", error=TurnError(kind))`, kind `overflow` / `timeout` / `quota` / `other`; overflow triggers one compact + retry of the same message
+6. Bad tool-argument JSON is returned to the model as an error `ToolResult`; `MAX_TOOL_CALLS` ends with `Done(tool_limit)`
+
+Backend differences live behind the `ModelStream` seam (`core/model_stream.py`); the turn uses a neutral message format and adapters in `core/backends.py` convert it to wire format. Tests swap in `tests/fake_model.py::FakeModel` via `agent.model_stream = FakeModel([...])`.
+
+`Agent.chat()` is a temporary callback shim over `run_turn` until the UI consumers are ported.
 
 ### History
 
@@ -274,7 +281,7 @@ Actual streaming is delegated to `core/backends.py`: `stream_ollama` for Ollama 
 | | `self.history` | `messages` (current turn) |
 |---|---|---|
 | Content | user + assistant final replies | includes tool_calls + tool_results |
-| Persisted | written to history.json | exists only during chat() call |
+| Persisted | written to history.json | exists only during run_turn() |
 | Next turn | rebuilt via `_trim_history()` | discarded |
 
 ### Adding a new model
@@ -303,7 +310,7 @@ Add one entry to `REGISTRY` in `core/models.py`:
 1. Define the Ollama tool schema (like `SEARCH_TOOL` in `core/tools/web.py`)
 2. Implement `async def my_tool(...) -> str`
 3. Register in `Agent.tools_map` in `core/agent.py`
-4. Pass the schema in `active_tools` list inside `chat()`
+4. Add the schema in `Agent.tool_schemas()`
 
 ## Agent config (`agents/<name>/config.json`)
 
@@ -456,7 +463,7 @@ See `CONVENTIONS.md` for the full style guide. Key points:
 - `textual` — TUI framework (with `[syntax]` extra for tree-sitter highlighting)
 - `textual-autocomplete` — slash command / path autocomplete in prompt
 - `ollama` — native Python client; used directly to access `msg.thinking` and `tool_calls`
-- `openai` — used by `stream_openai_compat` in `core/backends.py` for Gemini / compatible endpoints
+- `openai` — used by `OpenAICompatStream` in `core/backends.py` for Gemini / compatible endpoints
 - `rich` — text rendering in agent internals and widgets
 - `prompt_toolkit` — input history file format (FileHistory)
 - `tenacity` — retry logic in `web_search`

@@ -60,17 +60,14 @@ def _record_result(obs, tr: ToolResult) -> None:
 SUBAGENT_DISPATCH_TOOLS = {"send_to_agent"}
 
 
-async def run_tool(tc, tools_map: dict, mcp_client=None) -> ToolResult:
+async def run_tool(
+    fn_name: str, raw: dict, tools_map: dict, mcp_client=None
+) -> ToolResult:
     """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。
 
+    `raw` 是已解析的參數 dict（JSON 解析與錯誤處理在 turn 那一層）。
     回傳結構化的 :class:`ToolResult`，呼叫端不需再靠字串關鍵字判斷錯誤。
     """
-    import json
-
-    fn_name = tc.function.name
-    raw_args = tc.function.arguments
-    raw = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-
     if fn_name in SUBAGENT_DISPATCH_TOOLS:
         from ..langfuse_client import agent
 

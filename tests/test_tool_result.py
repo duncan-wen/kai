@@ -7,23 +7,11 @@
 """
 
 import asyncio
-import json
 
 
 from core.tools.bash import bash_exec
 from core.tools.dispatch import _dispatch, run_tool
 from core.tools.result import ToolResult
-
-
-class _FakeFn:
-    def __init__(self, name, arguments):
-        self.name = name
-        self.arguments = arguments
-
-
-class _FakeTC:
-    def __init__(self, name, args):
-        self.function = _FakeFn(name, json.dumps(args))
 
 
 # ---------- ToolResult 語意 ----------
@@ -140,12 +128,10 @@ def test_dispatch_wraps_plain_string_tool():
 
 
 def test_run_tool_returns_tool_result():
-    tc = _FakeTC("echo_tool", {"text": "yo"})
-
     async def echo_tool(text):
         return text
 
-    tr = asyncio.run(run_tool(tc, {"echo_tool": echo_tool}))
+    tr = asyncio.run(run_tool("echo_tool", {"text": "yo"}, {"echo_tool": echo_tool}))
     assert isinstance(tr, ToolResult)
     assert tr.fn_name == "echo_tool"
     assert tr.output == "yo"
