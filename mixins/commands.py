@@ -70,8 +70,7 @@ class CommandsMixin(_MixinBase):
             return
         # 存入的 /ask 回答算新對話：session 不再是 resumed session
         self._session_store().mark_active()
-        self.agent.history.extend(self.input_state.last_ephemeral)
-        self.agent.save_history()
+        self.agent.commit(self.input_state.last_ephemeral)
         self.input_state.last_ephemeral = None
         self.notify("已存入對話歷史", timeout=2)
 

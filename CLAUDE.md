@@ -270,7 +270,7 @@ When pasting multiline text into the prompt:
 
 Backend differences live behind the `ModelStream` seam (`core/model_stream.py`); the turn uses a neutral message format and adapters in `core/backends.py` convert it to wire format. Tests swap in `tests/fake_model.py::FakeModel` via `agent.model_stream = FakeModel([...])`.
 
-`Agent.chat()` is a temporary callback shim over `run_turn` until the UI consumers are ported.
+UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with their own sink. Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `agent.commit(done.new_messages)`.
 
 ### History
 

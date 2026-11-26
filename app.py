@@ -29,6 +29,7 @@ from textual.widgets import (
 from core.agent import Agent
 from core.agent_registry import AgentRegistry
 from core.app_state import AgentView, InputState, SessionState, TabState, UIState
+from core.model_stream import CancelToken
 import core.config as _kai_cfg
 from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
 from core.mcp_client import MCPClient, load_mcp_servers
@@ -161,6 +162,8 @@ class ChatApp(
         self.set_reactive(ChatApp.debug_tools, _kai_cfg.DEBUG_TOOLS)
         self._mcp_initializing = True
         self.tab_state = TabState()
+        # 進行中 turn 的取消旗標：(tab_id, CancelToken)，由 mark_busy / unmark_busy 維護
+        self._turn_cancels: list[tuple[str, CancelToken]] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -561,16 +564,29 @@ class ChatApp(
     def compute_prompt_locked(self) -> bool:
         return self.active_tab in self.busy_tabs
 
-    def mark_busy(self, tab_id: str) -> None:
-        """標記 tab 開始一件工作；該 tab 在畫面上時 prompt 會鎖住。"""
-        self.busy_tabs = (*self.busy_tabs, tab_id)
+    def mark_busy(self, tab_id: str, cancel: "CancelToken | None" = None) -> None:
+        """標記 tab 開始一件工作；該 tab 在畫面上時 prompt 會鎖住。
 
-    def unmark_busy(self, tab_id: str) -> None:
+        帶 cancel 的工作（turn）在使用者於該 tab 按 Esc 時會被取消。
+        """
+        self.busy_tabs = (*self.busy_tabs, tab_id)
+        if cancel is not None:
+            self._turn_cancels.append((tab_id, cancel))
+
+    def unmark_busy(self, tab_id: str, cancel: "CancelToken | None" = None) -> None:
         """結束 tab 的一件工作；全部結束且該 tab 在畫面上時 prompt 解鎖並 focus。"""
         busy = list(self.busy_tabs)
         if tab_id in busy:
             busy.remove(tab_id)
         self.busy_tabs = tuple(busy)
+        if cancel is not None and (tab_id, cancel) in self._turn_cancels:
+            self._turn_cancels.remove((tab_id, cancel))
+
+    def cancel_turns(self, tab_id: str) -> None:
+        """取消該 tab 上所有進行中的 turn。"""
+        for tid, cancel in self._turn_cancels:
+            if tid == tab_id:
+                cancel.cancel()
 
     def watch_think_override(self) -> None:
         self.refresh_agent_view()
@@ -667,7 +683,7 @@ class ChatApp(
         if self.prompt_locked:
             # 正在串流：取消並標記回填
             self.input_state.restore_input = True
-            self.agent._cancelled = True
+            self.cancel_turns(self.active_tab)
             if self._bash_proc and self._bash_proc.returncode is None:
                 try:
                     os.killpg(os.getpgid(self._bash_proc.pid), signal.SIGTERM)
