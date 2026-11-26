@@ -18,7 +18,7 @@ from .config import (
 )
 from .skills import discover_skills, skills_index_text
 from .models import REGISTRY, ModelProfile, get_profile
-from .model_stream import CancelToken, ModelStream, make_model_stream
+from .model_stream import ModelStream, make_model_stream
 from .langfuse_client import generation
 from .tools import (
     BASH_TOOL,
@@ -84,9 +84,6 @@ class Agent:
         self.model_stream: ModelStream = make_model_stream(self.profile)
         self.mcp_client: "MCPClient | None" = None
         self.mcp_context: str = ""
-        self.last_prediction: str = ""  # 相容層（chat()）用，第 2 段移除
-        self._compat_cancel: CancelToken | None = None  # 相容層用，第 2 段移除
-        self._last_cache_hit: int | None = None  # 相容層用，第 2 段移除
         self.tts_config: dict | None = (
             None  # 由 apply_definition 設定；None 表示不啟用 TTS
         )
@@ -553,59 +550,3 @@ class Agent:
                 + f"\n...[已截斷，共 {len(content)} 字元]"
             )
         return content
-
-    # ── 相容層：舊的 callback 介面，第 2 段 UI 改接 run_turn 後移除 ──────────────
-
-    @property
-    def _cancelled(self) -> bool:
-        return bool(self._compat_cancel and self._compat_cancel.cancelled)
-
-    @_cancelled.setter
-    def _cancelled(self, value: bool) -> None:
-        if value and self._compat_cancel:
-            self._compat_cancel.cancel()
-
-    async def chat(
-        self,
-        user_msg: dict,
-        on_token=None,
-        on_thinking=None,
-        on_done=None,
-        on_tool_call=None,
-        on_retry=None,
-    ):
-        """把 run_turn 的事件轉回舊 callback；錯誤照舊 raise。"""
-        from .turn import (
-            StepReset,
-            ThinkingDone,
-            Token,
-            ToolEvent,
-            TurnRequest,
-            run_turn,
-        )
-
-        async def sink(ev) -> None:
-            if isinstance(ev, Token) and on_token:
-                await on_token(ev.delta)
-            elif isinstance(ev, ThinkingDone) and on_thinking:
-                await on_thinking(ev.text)
-            elif isinstance(ev, StepReset) and on_retry:
-                await on_retry()
-            elif isinstance(ev, ToolEvent) and on_tool_call:
-                await on_tool_call(ev.name, ev.args, ev.result)
-
-        self._compat_cancel = CancelToken()
-        done = await run_turn(self, TurnRequest(user_msg), sink, self._compat_cancel)
-        self.last_prediction = done.prediction
-        self._last_cache_hit = done.stats.cache_hit
-        if done.error:
-            if done.error.kind == "timeout":
-                raise TimeoutError(done.error.message)
-            raise RuntimeError(done.error.message)
-        if done.reason == "tool_limit" and on_tool_call:
-            raise RuntimeError(
-                f"已達工具呼叫上限 {_cfg.MAX_TOOL_CALLS} 次，對話強制結束"
-            )
-        if done.reason in ("complete", "empty") and on_done:
-            st = done.stats
-            await on_done(st.elapsed, st.thinking_s, st.gen_tokens, st.prompt_tokens)

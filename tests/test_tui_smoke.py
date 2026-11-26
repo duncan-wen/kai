@@ -604,3 +604,71 @@ def test_agent_tab_close_clears_registry(app_factory, tmp_path: Path) -> None:
         assert app._active_msgs() is app.query_one("#messages")
 
     _run(app_factory, body)
+
+
+# ── turn → UI（FakeModel 取代模型伺服器）──────────────────────────────────────
+
+
+async def _wait_turn(app, pilot: Pilot) -> None:
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def test_send_renders_reply_stats_and_prediction(app_factory) -> None:
+    from tests.fake_model import FakeModel, reply
+    from widgets.chat import AIMessage
+    from widgets.input import HistoryInput
+
+    async def body(app, pilot: Pilot) -> None:
+        app.agent.model_stream = FakeModel(
+            [reply("哈", "囉<next>再見</next>", gen_tokens=3, prompt_tokens=100)]
+        )
+        await _submit(app, pilot, "你好")
+        await _wait_turn(app, pilot)
+
+        msgs = app._active_msgs()
+        assert [m._raw for m in msgs.query(AIMessage)] == ["哈囉"]
+        stats = [str(s.render()) for s in msgs.query(".stats")]
+        assert len(stats) == 1 and "3 tokens" in stats[0]
+        assert app.agent.history[-1] == {"role": "assistant", "content": "哈囉"}
+        assert app.query_one("#prompt", HistoryInput)._pending_prediction == "再見"
+        assert not app.prompt_locked
+
+    _run(app_factory, body)
+
+
+def test_ask_does_not_persist_until_save(app_factory) -> None:
+    from tests.fake_model import FakeModel, reply
+
+    async def body(app, pilot: Pilot) -> None:
+        app.agent.model_stream = FakeModel([reply("臨時答案")])
+
+        def chat_msgs() -> list[dict]:
+            return [m for m in app.agent.history if m["role"] != "system"]
+
+        before = chat_msgs()
+        await _submit(app, pilot, "/ask 問一下")
+        await _wait_turn(app, pilot)
+        assert chat_msgs() == before
+
+        await _submit(app, pilot, "/save")
+        assert app.agent.history[-2:] == [
+            {"role": "user", "content": "問一下"},
+            {"role": "assistant", "content": "臨時答案"},
+        ]
+
+    _run(app_factory, body)
+
+
+def test_turn_error_shows_message_and_unlocks(app_factory) -> None:
+    from tests.fake_model import FakeModel
+
+    async def body(app, pilot: Pilot) -> None:
+        app.agent.model_stream = FakeModel([TimeoutError("卡住了")])
+        await _submit(app, pilot, "hi")
+        await _wait_turn(app, pilot)
+        errors = [str(s.render()) for s in app._active_msgs().query(".error-msg")]
+        assert any("逾時" in e and "卡住了" in e for e in errors)
+        assert not app.prompt_locked
+
+    _run(app_factory, body)
