@@ -55,6 +55,7 @@ mixins/             → ChatApp behaviour split into focused mixins (all inherit
   streaming.py      → StreamingMixin: _send worker, on_token, on_done, TTS playback (run_in_executor thread)
 widgets/
   input.py          → HistoryInput, ChatAutoComplete, PromptSpinner (border_title spinner)
+  center_tabs.py    → CenterTabs(TabbedContent): file tabs, close (unsaved confirm, “×” click), move, messages_for(tab_id); posts TabClosed / ActiveChanged
   prompt_bar.py     → PromptBar: input row (📎 + HistoryInput + autocomplete); owns prompt history, posts PromptBar.Submitted
   slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
   tree.py           → RightClickTree, TreeContextMenu, FileTree
@@ -75,7 +76,7 @@ widgets/
 ### Layout
 
 ```
-┌─ FileTree ─┬─── TabbedContent ────────────────┬─ Sidebar ─┐
+┌─ FileTree ─┬─── CenterTabs ───────────────────┬─ Sidebar ─┐
 │ RightClick │  Chat tab  │  file tabs (×)       │ cwd       │
 │ Tree       │  messages  │  FileViewer          │ model     │
 │            │            │  (syntax highlight)  │ context   │
@@ -91,6 +92,7 @@ widgets/
 |--------|------|---------|
 | `ChatApp` | app.py | root App, composes all mixins, event handlers |
 | `PromptBar` | widgets/prompt_bar.py | input row: 📎 attach button + `HistoryInput`; owns Up/Down history (`.kai/.prompt_history`), marker expansion, mouse-debris filter; mounts `ChatAutoComplete` on the screen; posts `PromptBar.Submitted(text)` — `ChatApp.on_prompt_bar_submitted` only dispatches (`!` / `/` / chat) |
+| `CenterTabs` | widgets/center_tabs.py | `TabbedContent` subclass: opens / dedups file tabs (`open_file`), adds agent tabs (`add_agent_tab`, id from `AgentRegistry`), closes tabs (`request_close`: `ConfirmCloseScreen` for unsaved files, “×” click), moves tabs (`move_active`), finds a tab's message container (`messages_for`); posts `ActiveChanged(tab_id)` (App sets `active_tab` + active agent) and `TabClosed(tab_id)` (App drops agent tabs from the registry) |
 | `HistoryInput` | widgets/input.py | single-line input: long-text / multiline paste → marker, Ctrl+Z undo, ghost-text prediction; Up/Down post `HistoryInput.Navigate` to `PromptBar` |
 | `ChatAutoComplete` | widgets/input.py | slash command / path autocomplete |
 | `FileTree` | widgets/tree.py | lazy-loading dir tree; double-click opens file tab; Ctrl+click / Space multi-select for batch delete; 2s deep fs watcher |
@@ -197,9 +199,7 @@ On completion (`update_content(final=True)`): `stream-view` is hidden, `md-view`
 
 Avoid using `Button` for single-line or inline clickable labels. Textual's `Button` has a `border: tall` default that causes initial layout miscalculation (compositor renders 3-line height before CSS `border: none` takes effect), producing display corruption on first render that only resolves on focus.
 
-Use `Static` with `@on(events.Click, "#widget-id")` instead. Always call `event.stop()` in the handler to prevent the click from bubbling to `ChatApp.on_click` (which calls `screen.get_widget_at` — if a modal was just pushed in the same handler, that screen's compositor is not yet initialized and crashes).
-
-`ChatApp.on_click` wraps `screen.get_widget_at` in `try/except` as a defensive guard.
+Use `Static` with `@on(events.Click, "#widget-id")` instead. Always call `event.stop()` in the handler so the click doesn't bubble on to ancestor click handlers (e.g. `CenterTabs.on_click`, which closes a tab on its “×”). Use `event.widget` to find what was clicked; don't call `screen.get_widget_at` — if a modal was just pushed in the same handler, that screen's compositor is not yet initialized and crashes.
 
 ### Markdown rendering fixes
 

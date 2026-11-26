@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from textual import work
 from textual.containers import VerticalScroll
-from textual.widgets import TabbedContent, TabPane
 
 from core.agent import Agent
 from core.agent_factory import read_definition
+from widgets.center_tabs import CenterTabs
 from widgets.input import HistoryInput, PromptSpinner
 from typing import TYPE_CHECKING
 
@@ -106,9 +106,9 @@ class AgentsMixin(_MixinBase):
         )
         self._apply_definition(agent, defn)
         tab_id = self.agents.add(agent)  # 配 tab id，並接上目前的 MCP
-        scroll = VerticalScroll(id=f"msgs-{tab_id}")
-        pane = TabPane(f"🤖 {defn.display_name} ×", scroll, id=tab_id)
-        await self.query_one("#center-tabs", TabbedContent).add_pane(pane)
+        scroll = await self.query_one(CenterTabs).add_agent_tab(
+            tab_id, defn.display_name
+        )
         self._switch_to_tab(tab_id)
         await self._render_history_into(scroll, agent)
         self.notify(f"✅ 已開啟 agent：{defn.name}", timeout=3)

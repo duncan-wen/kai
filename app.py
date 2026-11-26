@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from textual.worker import Worker
 
 from loguru import logger
-from textual import events, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
@@ -23,7 +23,6 @@ from textual.widgets import (
     Footer,
     Header,
     Static,
-    TabbedContent,
     TabPane,
 )
 
@@ -45,9 +44,8 @@ from mixins.streaming import StreamingMixin
 from widgets.chat import (
     AIMessage,
     CapBar,
-    ConfirmCloseScreen,
-    FileViewer,
 )
+from widgets.center_tabs import CenterTabs
 from widgets.commands import ChatCommands
 from widgets.input import HistoryInput
 from widgets.prompt_bar import PromptBar
@@ -154,7 +152,6 @@ class ChatApp(
         self._at_mention_re = re.compile(r"(?:(?<=\s)|^)@(\S+)")
         self._mcp_task: asyncio.Task | None = None
         self._mcp_done: asyncio.Event | None = None
-        self._open_file_tabs: dict[str, Path] = {}
         self._last_file_copy: dict | None = None
         self._bash_proc: asyncio.subprocess.Process | None = None
         self._bash_worker: "Worker | None" = None  # type: ignore[name-defined]
@@ -170,7 +167,7 @@ class ChatApp(
         with Horizontal(id="app-grid"):
             yield FileTree(id="file-tree")
             yield ResizeHandle("file-tree", id="file-tree-handle")
-            with TabbedContent(initial="chat", id="center-tabs"):
+            with CenterTabs(initial="chat", id="center-tabs"):
                 with TabPane("💬 Chat", id="chat"):
                     with VerticalScroll(id="messages"):
                         yield Static(
@@ -591,40 +588,22 @@ class ChatApp(
         ft.display = not ft.display
         self.query_one("#file-tree-handle", ResizeHandle).display = ft.display
 
-    async def on_click(self, event: events.Click) -> None:
-        try:
-            widget, region = self.screen.get_widget_at(event.screen_x, event.screen_y)
-        except Exception:
-            return
-        wid = widget.id or "" if widget else ""
-        if not wid.startswith("--content-tab-") or wid == "--content-tab-chat":
-            return
-        tab_id = wid[len("--content-tab-") :]
-        if event.screen_x >= region.x + region.width - 2:
-            event.stop()
-            await self._maybe_close_tab(tab_id)
-
-    def on_tabbed_content_tab_activated(
-        self, event: TabbedContent.TabActivated
-    ) -> None:
-        """切換到 agent tab（或 chat tab）時把它設為作用中的 Agent。
-
-        讀 tc.active 而不是 event.pane.id：晚到的過時事件也只會套用畫面上真正的 tab。
-        檔案 tab 不改變作用中的 Agent。
-        """
-        tab_id = self.query_one("#center-tabs", TabbedContent).active
-        if not tab_id:
-            return
-        if self.agents.activate(tab_id):
+    def on_center_tabs_active_changed(self, event: CenterTabs.ActiveChanged) -> None:
+        """切換到 agent tab（或 chat tab）時把它設為作用中的 Agent；檔案 tab 不改變作用中的 Agent。"""
+        if self.agents.activate(event.tab_id):
             self._on_active_agent_changed()
         # prompt 鎖定由 prompt_locked（active_tab ∈ busy_tabs）決定
-        self.active_tab = tab_id
+        self.active_tab = event.tab_id
         if not self.prompt_locked:
             self.query_one("#prompt", HistoryInput).focus()
 
+    def on_center_tabs_tab_closed(self, event: CenterTabs.TabClosed) -> None:
+        if event.tab_id != AgentRegistry.MAIN_ID and self.agents.get(event.tab_id):
+            self.agents.remove(event.tab_id)
+
     def _switch_to_tab(self, tab_id: str) -> None:
         """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
-        self.query_one("#center-tabs", TabbedContent).active = tab_id
+        self.query_one(CenterTabs).active = tab_id
         self.active_tab = tab_id
         if self.agents.activate(tab_id):
             self._on_active_agent_changed()
@@ -644,119 +623,21 @@ class ChatApp(
         if path.suffix.lower() in _IMAGE_EXTS:
             self.query_one(PromptBar).attach(path)
         else:
-            self._open_file_tab(path)
-
-    @work
-    async def _open_file_tab(self, path: Path) -> None:
-        tc = self.query_one("#center-tabs", TabbedContent)
-        for tid, p in self._open_file_tabs.items():
-            if p == path:
-                tc.active = tid
-                return
-        self.tab_state.file_tab_counter += 1
-        tab_id = f"ft-{self.tab_state.file_tab_counter}"
-        try:
-            content = await asyncio.to_thread(
-                path.read_text, encoding="utf-8", errors="replace"
-            )
-        except Exception as e:
-            self.notify(f"無法讀取 {path.name}：{e}", severity="error")
-            return
-        from widgets.utils import _SUFFIX_TO_LANG
-
-        lang = _SUFFIX_TO_LANG.get(path.suffix.lower())
-        ta = FileViewer(
-            content,
-            language=lang,
-            show_line_numbers=True,
-            soft_wrap=False,
-            file_path=path,
-        )
-        self._open_file_tabs[tab_id] = path
-        await tc.add_pane(TabPane(f"{path.name} ×", ta, id=tab_id))
-        tc.active = tab_id
-
-    def _move_active_tab(self, direction: int) -> None:
-        """將目前 active tab 往左（-1）或右（+1）移動一格，Chat tab 不可移動。"""
-        from textual.widgets._content_switcher import ContentSwitcher
-        from textual.widgets._tabbed_content import ContentTab, ContentTabs
-
-        tc = self.query_one("#center-tabs", TabbedContent)
-        active_id = tc.active
-        if not active_id or active_id == "chat":
-            return
-        try:
-            content_tabs = tc.get_child_by_type(ContentTabs)
-            tabs_list = content_tabs.query_one("#tabs-list")
-            tabs = list(tabs_list.query("Tab").results())
-            cur = next(
-                (
-                    i
-                    for i, t in enumerate(tabs)
-                    if t.id == ContentTab.add_prefix(active_id)
-                ),
-                None,
-            )
-            if cur is None:
-                return
-            tgt = cur + direction
-            if tgt < 0 or tgt >= len(tabs):
-                return
-            if ContentTab.sans_prefix(tabs[tgt].id or "") == "chat":
-                return
-            if direction == -1:
-                tabs_list.move_child(tabs[cur], before=tabs[tgt])
-            else:
-                tabs_list.move_child(tabs[cur], after=tabs[tgt])
-            switcher = tc.get_child_by_type(ContentSwitcher)
-            panes = list(switcher.children)
-            pi = next((i for i, p in enumerate(panes) if p.id == active_id), None)
-            if pi is not None:
-                ni = pi + direction
-                if 0 <= ni < len(panes):
-                    if direction == -1:
-                        switcher.move_child(panes[pi], before=panes[ni])
-                    else:
-                        switcher.move_child(panes[pi], after=panes[ni])
-        except Exception as _e:
-            logger.warning(f"move_tab 失敗（tab/pane 可能不同步）：{_e}")
+            self.query_one(CenterTabs).open_file(path)
 
     def action_move_tab_left(self) -> None:
-        self._move_active_tab(-1)
+        self.query_one(CenterTabs).move_active(-1)
 
     def action_move_tab_right(self) -> None:
-        self._move_active_tab(1)
+        self.query_one(CenterTabs).move_active(1)
 
     async def action_close_tab(self) -> None:
-        tc = self.query_one("#center-tabs", TabbedContent)
-        active_id = tc.active
-        if not active_id or active_id == "chat":
-            return
-        await self._maybe_close_tab(active_id)
+        tabs = self.query_one(CenterTabs)
+        await tabs.request_close(tabs.active)
 
     async def _maybe_close_tab(self, tab_id: str) -> None:
-        """關閉 tab，若有未存檔修改則先以 modal 詢問確認。"""
-        try:
-            pane = self.query_one(f"TabPane#{tab_id}")
-            viewer = pane.query_one(FileViewer)
-            if viewer._modified:
-                fname = viewer._file_path.name if viewer._file_path else "檔案"
-
-                def _on_confirm(confirmed: bool | None) -> None:
-                    if confirmed:
-                        self._open_file_tabs.pop(tab_id, None)
-                        self.query_one("#center-tabs", TabbedContent).remove_pane(
-                            tab_id
-                        )
-
-                self.push_screen(ConfirmCloseScreen(fname), callback=_on_confirm)
-                return  # 等 callback 決定是否關閉
-        except Exception:
-            pass
-        self._open_file_tabs.pop(tab_id, None)
-        if self.agents.get(tab_id) is not None and tab_id != AgentRegistry.MAIN_ID:
-            self.agents.remove(tab_id)
-        await self.query_one("#center-tabs", TabbedContent).remove_pane(tab_id)
+        """關閉 tab（未存檔檔案會先確認）；agent tab 關掉後由 on_center_tabs_tab_closed 清 registry。"""
+        await self.query_one(CenterTabs).request_close(tab_id)
 
     def action_toggle_sidebar(self) -> None:
         sidebar = self.query_one("#sidebar", Sidebar)
@@ -765,15 +646,7 @@ class ChatApp(
 
     def _active_msgs(self) -> VerticalScroll:
         """回傳作用中 Agent 對應的訊息容器。"""
-        tab_id = self.agents.active_id
-        if tab_id == AgentRegistry.MAIN_ID:
-            return self.query_one("#messages", VerticalScroll)
-        try:
-            return self.query_one(f"TabPane#{tab_id}", TabPane).query_one(
-                VerticalScroll
-            )
-        except Exception:
-            return self.query_one("#messages", VerticalScroll)
+        return self.query_one(CenterTabs).messages_for(self.agents.active_id)
 
     @property
     def agent(self) -> Agent:

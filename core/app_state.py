@@ -57,7 +57,6 @@ class AgentView:
 
 @dataclass
 class TabState:
-    """Tab 管理：檔案 tab 計數、pending 工具排程。agent tab 由 core.agent_registry 管理。"""
+    """Tab 相關的 pending 工具排程。檔案 tab 由 widgets.center_tabs 管理，agent tab 由 core.agent_registry 管理。"""
 
-    file_tab_counter: int = 0
     pending_open_agent: str | None = None

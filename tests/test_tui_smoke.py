@@ -299,6 +299,7 @@ def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
     async def body(app, pilot: Pilot) -> None:
         from textual.widgets import TabbedContent
 
+        from widgets.center_tabs import CenterTabs
         from widgets.input import HistoryInput
 
         prompt = app.query_one("#prompt", HistoryInput)
@@ -311,7 +312,7 @@ def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
         # 切到檔案 tab：該 tab 沒在忙 → 解鎖
         f = tmp_path / "a.txt"
         f.write_text("hi", encoding="utf-8")
-        await app._open_file_tab(f).wait()  # @work：回傳 Worker
+        await app.query_one(CenterTabs).open_file(f).wait()  # @work：回傳 Worker
         await pilot.pause()
         assert app.active_tab != "chat"
         assert not app.prompt_locked and not prompt.disabled
@@ -460,5 +461,146 @@ def test_prompt_up_down_leave_open_dropdown_alone(app_factory) -> None:
         await pilot.pause()
         assert not bar.autocomplete.display
         assert bar.prompt.value == "/mc"
+
+    _run(app_factory, body)
+
+
+# ── CenterTabs ──────────────────────────────────────────────────────────────
+
+
+async def _open(app, pilot: Pilot, path: Path) -> str:
+    from widgets.center_tabs import CenterTabs
+
+    tabs = app.query_one(CenterTabs)
+    await tabs.open_file(path).wait()
+    await pilot.pause()
+    return tabs.active
+
+
+def test_file_tabs_open_dedup_and_close(app_factory, tmp_path: Path) -> None:
+    """同一檔案只開一個 tab；Ctrl+W 關目前 tab；Chat tab 關不掉。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        a, b = tmp_path / "a.txt", tmp_path / "b.py"
+        a.write_text("aa", encoding="utf-8")
+        b.write_text("bb", encoding="utf-8")
+        ta = await _open(app, pilot, a)
+        tb = await _open(app, pilot, b)
+        assert ta != tb and app.active_tab == tb
+        assert await _open(app, pilot, a) == ta  # 已開啟 → 切過去
+        assert tabs.tab_order() == ["chat", ta, tb]
+
+        await pilot.press("ctrl+w")
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", tb]
+        tabs.active = "chat"
+        await pilot.pause()
+        await pilot.press("ctrl+w")
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", tb]
+
+    _run(app_factory, body)
+
+
+def test_unsaved_file_tab_asks_before_close(app_factory, tmp_path: Path) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+        from widgets.chat import ConfirmCloseScreen, FileViewer
+
+        tabs = app.query_one(CenterTabs)
+        f = tmp_path / "a.txt"
+        f.write_text("aa", encoding="utf-8")
+        tid = await _open(app, pilot, f)
+        tabs.get_pane(tid).query_one(FileViewer)._modified = True
+
+        await tabs.request_close(tid)
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmCloseScreen)
+        await pilot.press("n")
+        await pilot.pause()
+        assert tid in tabs.tab_order()
+
+        await tabs.request_close(tid)
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert tid not in tabs.tab_order()
+        assert app.active_tab == "chat"
+
+    _run(app_factory, body)
+
+
+def test_click_x_closes_tab(app_factory, tmp_path: Path) -> None:
+    """點標籤最右邊的 “×” 關閉；點標籤其他地方只切換。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from textual.widgets._tabbed_content import ContentTab
+
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        f = tmp_path / "a.txt"
+        f.write_text("aa", encoding="utf-8")
+        tid = await _open(app, pilot, f)
+        tabs.active = "chat"
+        await pilot.pause()
+
+        tab = tabs.query_one(f"#{ContentTab.add_prefix(tid)}", ContentTab)
+        await pilot.click(tab, offset=(1, 0))
+        await pilot.pause()
+        assert tabs.active == tid and tid in tabs.tab_order()
+        await pilot.click(tab, offset=(tab.region.width - 1, 0))
+        await pilot.pause()
+        assert tid not in tabs.tab_order()
+
+    _run(app_factory, body)
+
+
+def test_move_tab_keeps_chat_first(app_factory, tmp_path: Path) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        paths = [tmp_path / f"{n}.txt" for n in "ab"]
+        for p in paths:
+            p.write_text(p.stem, encoding="utf-8")
+        ta = await _open(app, pilot, paths[0])
+        tb = await _open(app, pilot, paths[1])
+        await pilot.press("ctrl+shift+left")
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", tb, ta]
+        await pilot.press("ctrl+shift+left")  # 不能越過 Chat
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", tb, ta]
+        await pilot.press("ctrl+shift+right")
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", ta, tb]
+
+    _run(app_factory, body)
+
+
+def test_agent_tab_close_clears_registry(app_factory, tmp_path: Path) -> None:
+    """agent tab：開啟後成為作用中 Agent、訊息畫在自己的容器；關閉後 registry 移除、退回 main。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from core.agent import Agent
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        agent = Agent(model=app.agent.profile.name, history_file=tmp_path / "h.json")
+        tid = app.agents.add(agent)
+        scroll = await tabs.add_agent_tab(tid, "測試")
+        app._switch_to_tab(tid)
+        await pilot.pause()
+        assert app.agent is agent and app._active_msgs() is scroll
+
+        await app._maybe_close_tab(tid)
+        await pilot.pause()
+        assert app.agents.get(tid) is None
+        assert app.agents.active_id == "chat" and app.active_tab == "chat"
+        assert app._active_msgs() is app.query_one("#messages")
 
     _run(app_factory, body)
