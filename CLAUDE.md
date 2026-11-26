@@ -36,7 +36,7 @@ core/
   agent_factory.py  → /create-agent, /load-agent, /list-agents logic (AI-based agent design)
   agent_registry.py → AgentRegistry: sole owner of main agent + agent tabs (tab ids, active agent, name lookup, MCP distribution); ChatApp.agent = agents.active
   backends.py       → stream_ollama / stream_openai_compat (backend-specific streaming)
-  app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState); agent tabs live in AgentRegistry, not here
+  app_state.py      → ChatApp state dataclasses (InputState, SessionState, UIState, TabState) + AgentView display snapshot; agent tabs live in AgentRegistry, not here
   session_store.py  → SessionStore: /cls, /resume, session naming, archive list/rename/delete (disk-only state)
   tools/            → built-in tools: web.py (web_search / fetch_urls), bash.py (bash_exec), dify.py (RAG), dispatch.py (run_tool)
   models.py         → ModelProfile dataclass + REGISTRY
@@ -58,7 +58,7 @@ widgets/
   slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
   tree.py           → RightClickTree, TreeContextMenu, FileTree
   sidebar.py        → ResizeHandle, Sidebar
-  chat.py           → ImageBubble, FileViewer, CopyButton, CapabilityBadge, CapLabel, AIMessage
+  chat.py           → ImageBubble, FileViewer, CopyButton, CapBar, AIMessage
   commands.py       → ChatCommands (command palette provider)
   agents_screen.py  → AgentsScreen ModalScreen (DataTable agent selector)
   mcp_list.py       → MCPListScreen ModalScreen (MCP server / tool listing)
@@ -139,7 +139,19 @@ widgets/
 
 Adding a slash command: write `async def _cmd_xxx(self, arg: str) -> None` in `mixins/commands.py` with `@slash("/xxx", "說明", needs_arg=..., presets=...)`. Prompt submit, autocomplete and the Ctrl+P palette all read the same table; `needs_arg=True` makes the palette fill the prompt instead of running. Don't add `if cmd == ...` branches to `on_input_submitted`.
 
-Prompt spinner: use `PromptSpinner(prompt, label, suffix=..., visible=...).start()` and `stop()` in `finally`; change `spinner.label` to update the phase text. Don't hand-roll `set_interval` tick closures.
+Prompt spinner: use `PromptSpinner(prompt, label, visible=...).start()` and `stop()` in `finally`; change `spinner.label` to update the phase text. `stop()` restores the idle title itself. Don't hand-roll `set_interval` tick closures.
+
+### Reactive UI state
+
+State that is drawn on screen lives in `ChatApp` reactives; widgets bind to it in `compose()` via `data_bind` and redraw in their own `watch_*`:
+
+| Reactive | Bound by | Drives |
+|----------|----------|--------|
+| `debug_tools` | `HistoryInput.debug_mark` | prompt idle title / spinner debug mark |
+| `think_override` | (`watch_think_override` → `refresh_agent_view`) | thinking on/off |
+| `agent_view: AgentView` | `Sidebar.view`, `CapBar.view`; `ChatApp.watch_agent_view` | sidebar model + MCP, cap-bar think/vision, subtitle, prompt placeholder |
+
+`AgentView` (`core/app_state.py`) is a frozen snapshot of the active agent. Agents are mutated in place by core code, so after changing anything it shows (model switch, nickname, tab switch, reload-agent, rename/resume/cd, MCP ready) call `self.refresh_agent_view()` — equal snapshots don't trigger redraws. Don't write to `#sb-model` / `#cap-think` / `sub_title` / prompt `border_title` directly.
 
 ### `!` bash commands
 

@@ -11,7 +11,7 @@ from rich.text import Text
 from textual import work
 from textual.widgets import Static
 
-from core.config import BASH_TIMEOUT, get_nickname
+from core.config import BASH_TIMEOUT
 from widgets.input import HistoryInput
 from widgets.sidebar import Sidebar
 from widgets.tree import FileTree
@@ -109,8 +109,7 @@ class BashMixin(_MixinBase):
             msgs.scroll_end(animate=False)
             prompt.disabled = False
             prompt.remove_class("streaming")
-            self._update_prompt_title()
-            prompt.placeholder = f"傳訊息給 {get_nickname(self.agent.profile.name)}..."
+            prompt.show_idle_title()
             prompt.focus()
             self._bash_proc = None
             self._bash_worker = None

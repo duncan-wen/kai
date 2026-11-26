@@ -16,6 +16,7 @@ from loguru import logger
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.message import Message
+from textual.reactive import reactive
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
@@ -29,7 +30,7 @@ from textual.widgets import (
 
 from core.agent import Agent
 from core.agent_registry import AgentRegistry
-from core.app_state import InputState, SessionState, TabState, UIState
+from core.app_state import AgentView, InputState, SessionState, TabState, UIState
 import core.config as _kai_cfg
 from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
 from core.mcp_client import MCPClient, load_mcp_servers
@@ -45,8 +46,7 @@ from mixins.streaming import StreamingMixin
 from textual_fspicker import FileOpen, Filters
 from widgets.chat import (
     AIMessage,
-    CapabilityBadge,
-    CapLabel,
+    CapBar,
     ConfirmCloseScreen,
     FileViewer,
 )
@@ -162,6 +162,14 @@ class ChatApp(
         Binding("escape", "cancel_stream", "取消", priority=True),
     ]
 
+    # ── 會畫到畫面上的狀態：widget 透過 data_bind / watcher 自己更新 ──────────
+    debug_tools: reactive[bool] = reactive(False, init=False)
+    """工具除錯模式（綁到 prompt 的 debug 標記）。"""
+    think_override: reactive[bool | None] = reactive(None, init=False)
+    """使用者手動切的 thinking；None = 跟模型預設。"""
+    agent_view: reactive[AgentView] = reactive(AgentView, init=False)
+    """作用中 Agent 的顯示快照；改了 agent 狀態後呼叫 refresh_agent_view()。"""
+
     def __init__(self) -> None:
         super().__init__()
         # Textual 8 的 MarkdownTableCellContents 在每個 header cell 呼叫 .with_tooltip()，
@@ -185,7 +193,9 @@ class ChatApp(
         self._bash_worker: "Worker | None" = None  # type: ignore[name-defined]
         self.session = SessionState(prev_cwd=os.getcwd())
         self.input_state = InputState(history=_load_prompt_history())
-        self.ui_state = UIState(debug_tools=_kai_cfg.DEBUG_TOOLS)
+        self.ui_state = UIState()
+        self.set_reactive(ChatApp.debug_tools, _kai_cfg.DEBUG_TOOLS)
+        self._mcp_initializing = True
         self.tab_state = TabState()
 
     def compose(self) -> ComposeResult:
@@ -207,14 +217,12 @@ class ChatApp(
                             markup=True,
                         )
             yield ResizeHandle("sidebar", id="sidebar-handle", right_anchor=True)
-            yield Sidebar(id="sidebar")
+            yield Sidebar(id="sidebar").data_bind(view=ChatApp.agent_view)
         with Horizontal(id="input-row"):
             yield Static("📎", id="attach-btn", classes="attach-btn")
-            yield HistoryInput(placeholder=f"傳訊給 {_kai_cfg.MODEL}...", id="prompt")
+            yield HistoryInput(id="prompt").data_bind(debug_mark=ChatApp.debug_tools)
         yield ChatAutoComplete(target="#prompt", candidates=None)
-        with Horizontal(id="cap-bar"):
-            yield CapabilityBadge("think", "think")
-            yield CapLabel("vision", "vision")
+        yield CapBar(id="cap-bar").data_bind(view=ChatApp.agent_view)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -238,12 +246,10 @@ class ChatApp(
             return f"✅ 找到 agent：{dir_name}，正在開啟..."
 
         self.agents.main.tools_map["open_agent"] = _open_agent_tool
-        # session 名稱與 resume 狀態都在磁碟上（SessionStore），這裡只需更新標題
-        self._update_subtitle()
+        # session 名稱與 resume 狀態都在磁碟上（SessionStore），這裡只需畫出來
+        self.refresh_agent_view()
         self.query_one("#prompt", HistoryInput).focus()
-        self._update_prompt_title()
         self._render_history()
-        self._sync_cap_bar()
         self.set_interval(15, lambda: self.query_one("#sidebar", Sidebar).refresh_git())
         self._mcp_done = asyncio.Event()
         self._refresh_skills_sidebar()
@@ -317,16 +323,15 @@ class ChatApp(
         Keeping start() and stop() in the same task avoids anyio cross-task
         cancel scope errors that occur when stop() is called from on_unmount.
         """
-        sidebar = self.query_one("#sidebar", Sidebar)
         servers = load_mcp_servers()
         if not servers:
-            sidebar.set_mcp({})
+            self._mcp_ready()
             return
         mcp = MCPClient(servers, errlog=open(os.devnull, "w"))
         try:
             await mcp.start()
             if not mcp.tool_names:
-                sidebar.set_mcp({})
+                self._mcp_ready()
                 return
             ctx = await _fetch_db_schema(mcp)
             fs_paths = [
@@ -339,7 +344,7 @@ class ChatApp(
             if fs_paths:
                 ctx += f"\n檔案系統可存取目錄：{', '.join(fs_paths)}"
             self.agents.set_mcp(mcp, ctx)
-            sidebar.set_mcp(mcp.server_summary)
+            self._mcp_ready()
             logger.info(f"MCP 初始化完成：{mcp.tool_names}")
             assert self._mcp_done
             await self._mcp_done.wait()
@@ -348,6 +353,11 @@ class ChatApp(
         finally:
             self.agents.set_mcp(None, "")
             await mcp.stop()
+
+    def _mcp_ready(self) -> None:
+        """MCP 初始化結束（不論有無 server）：sidebar 從「初始化中」換成實際狀態。"""
+        self._mcp_initializing = False
+        self.refresh_agent_view()
 
     async def action_quit(self) -> None:
         if self._mcp_done:
@@ -653,11 +663,6 @@ class ChatApp(
                 pass
         return files
 
-    def _update_prompt_title(self) -> None:
-        base = f"[bold]{USERNAME}[/bold] [dim]❯[/dim]"
-        suffix = "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else ""
-        self.query_one("#prompt", HistoryInput).border_title = base + suffix
-
     def _do_tts_switch(self, arg: str) -> None:
         _ENGINES = ("edge-tts", "azure-tts", "kokoro", "kokoro-api", "melotts", "off")
         engine = arg.strip().lower()
@@ -696,32 +701,50 @@ class ChatApp(
         self.notify(f"TTS 切換為：{engine}  voice={voice_info}", timeout=4)
 
     def _thinking_active(self) -> bool:
-        if self.ui_state.think_override is not None:
-            return self.ui_state.think_override
+        if self.think_override is not None:
+            return self.think_override
         return self.agent.profile.supports_thinking
 
-    def _sync_cap_bar(self) -> None:
-        profile = self.agent.profile
-        thinking_on = self._thinking_active()
-
-        think = self.query_one("#cap-think", CapabilityBadge)
-        think.remove_class("cap-think-on", "cap-inactive", "cap-unsupported")
-        if thinking_on:
-            think.add_class("cap-think-on")
-        elif not profile.supports_thinking:
-            think.add_class("cap-unsupported")
+    def refresh_agent_view(self) -> None:
+        """從作用中 Agent 重算顯示快照；值沒變就不會觸發任何重畫。"""
+        agent = self.agent
+        profile = agent.profile
+        if self._mcp_initializing:
+            mcp = None
         else:
-            think.add_class("cap-inactive")
+            summary = agent.mcp_client.server_summary if agent.mcp_client else {}
+            mcp = tuple(summary.items())
+        self.agent_view = AgentView(
+            display_name=agent.display_name,
+            model=profile.name,
+            supports_thinking=profile.supports_thinking,
+            supports_vision=profile.supports_vision,
+            thinking_on=self._thinking_active(),
+            mcp=mcp,
+            session_name=self._session_store().name or "",
+        )
 
-        vision = self.query_one("#cap-vision", CapLabel)
-        vision.display = bool(profile.supports_vision)
+    def watch_agent_view(self, old: AgentView, new: AgentView) -> None:
+        self.sub_title = (
+            f"{new.display_name} · {new.session_name}"
+            if new.session_name
+            else new.display_name
+        )
+        if old.display_name != new.display_name:
+            self.query_one("#prompt", HistoryInput).set_base_placeholder(
+                f"傳訊息給 {new.display_name}..."
+            )
+
+    def watch_think_override(self) -> None:
+        self.refresh_agent_view()
 
     def action_toggle_think(self) -> None:
-        current = self._thinking_active()
-        self.ui_state.think_override = not current
-        self._sync_cap_bar()
-        label = "開啟 💡" if self.ui_state.think_override else "關閉"
+        self.think_override = not self._thinking_active()
+        label = "開啟 💡" if self.think_override else "關閉"
         self.notify(f"Thinking：{label}", severity="information", timeout=2)
+
+    def on_cap_bar_think_toggled(self, event: CapBar.ThinkToggled) -> None:
+        self.action_toggle_think()
 
     def action_toggle_file_tree(self) -> None:
         ft = self.query_one("#file-tree", FileTree)
@@ -753,7 +776,7 @@ class ChatApp(
         if not tab_id:
             return
         if self.agents.activate(tab_id):
-            self._sync_active_agent_ui()
+            self._on_active_agent_changed()
         # 根據新 tab 是否正在串流，恢復或保持 prompt 鎖定狀態
         # （_send 結束時若使用者已不在原 tab，解鎖交給這裡）
         prompt = self.query_one("#prompt", HistoryInput)
@@ -763,27 +786,18 @@ class ChatApp(
         else:
             prompt.disabled = False
             prompt.remove_class("streaming")
-            self._update_prompt_title()
+            prompt.show_idle_title()
             prompt.focus()
 
     def _switch_to_tab(self, tab_id: str) -> None:
         """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
         self.query_one("#center-tabs", TabbedContent).active = tab_id
         if self.agents.activate(tab_id):
-            self._sync_active_agent_ui()
+            self._on_active_agent_changed()
 
-    def _sync_active_agent_ui(self) -> None:
-        """把作用中 Agent 的模型、MCP、暱稱同步到 sidebar／prompt／subtitle／cap-bar。"""
-        sidebar = self.query_one("#sidebar", Sidebar)
-        prompt = self.query_one("#prompt", HistoryInput)
-        prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
-        sidebar.set_model(self.agent.profile.name)
-        sidebar.set_mcp(
-            self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
-        )
+    def _on_active_agent_changed(self) -> None:
+        self.refresh_agent_view()
         self._refresh_skills_sidebar()
-        self._update_subtitle()
-        self._sync_cap_bar()
 
     def _refresh_skills_sidebar(self) -> None:
         """把目前 cwd 可用的 skills 同步到側邊欄。"""

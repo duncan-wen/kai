@@ -7,10 +7,12 @@ import subprocess
 
 from textual import events, on, work
 from textual.app import ComposeResult
+from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 from textual_fspicker import SelectDirectory
 
+from core.app_state import AgentView
 from core.config import MODEL
 
 
@@ -64,7 +66,9 @@ class ResizeHandle(Widget):
 
 
 class Sidebar(Widget):
-    """工作目錄、模型、Git 狀態側邊欄。"""
+    """工作目錄、模型、Git 狀態側邊欄。模型與 MCP 由 `view`（綁 ChatApp.agent_view）決定。"""
+
+    view: reactive[AgentView] = reactive(AgentView, init=False)
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -129,21 +133,17 @@ class Sidebar(Widget):
     def refresh_git(self) -> None:
         self._refresh_git_worker()
 
-    def set_model(self, name: str) -> None:
-        self.query_one("#sb-model", Static).update(name)
-
-    def set_mcp(self, summary: dict[str, int]) -> None:
-        if summary:
-            lines = [
-                f"[green]{name}[/green] [dim]{n}t[/dim]" for name, n in summary.items()
-            ]
-            text = "\n".join(lines)
+    def watch_view(self, view: AgentView) -> None:
+        self.query_one("#sb-model", Static).update(view.model)
+        if view.mcp is None:
+            text = "[dim]初始化中...[/dim]"
+        elif view.mcp:
+            text = "\n".join(
+                f"[green]{name}[/green] [dim]{n}t[/dim]" for name, n in view.mcp
+            )
         else:
             text = "[dim]未啟用[/dim]"
-        try:
-            self.query_one("#sb-mcp", Static).update(text)
-        except Exception:
-            pass
+        self.query_one("#sb-mcp", Static).update(text)
 
     def set_skills(self, names: list[str]) -> None:
         if names:

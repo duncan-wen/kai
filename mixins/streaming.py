@@ -8,7 +8,7 @@ import re
 
 from loguru import logger
 from textual import work
-from textual.widgets import Collapsible, Markdown, Static
+from textual.widgets import Collapsible, Markdown, Static, TabbedContent
 
 
 from widgets.chat import AIMessage
@@ -55,11 +55,12 @@ class StreamingMixin(_MixinBase):
             # 有新訊息代表已脫離 resume 快照
             self._session_store(agent).mark_active()
         _history_snapshot = [m.copy() for m in agent.history] if ephemeral else None
-        spinner = PromptSpinner(
-            prompt,
-            "等待回覆",
-            suffix=lambda: "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else "",
-        ).start()
+
+        def _on_my_tab() -> bool:
+            return self.query_one("#center-tabs", TabbedContent).active == _my_tab_id
+
+        # 只在送出時的 tab 上畫：切到別的 tab 時不蓋掉那邊的標題
+        spinner = PromptSpinner(prompt, "等待回覆", visible=_on_my_tab).start()
         self.tab_state.streaming_tabs.add(_my_tab_id)
         prompt.add_class("streaming")
         prompt.disabled = True
@@ -212,7 +213,7 @@ class StreamingMixin(_MixinBase):
                     self.query_one("#file-tree", FileTree).refresh_tree()
                 icon = "❌" if is_err else ("⚠️" if is_warn else "🔧")
                 card_class = "tool-debug tool-debug-error" if is_err else "tool-debug"
-                if not self.ui_state.debug_tools:
+                if not self.debug_tools:
                     if is_err:
                         args_preview = json.dumps(args, ensure_ascii=False)
                         if len(args_preview) > 300:
@@ -359,14 +360,11 @@ class StreamingMixin(_MixinBase):
                 _active_now = _my_tab_id
             if _active_now == _my_tab_id:
                 prompt.remove_class("streaming")
-                self._update_prompt_title()
                 prompt.disabled = False
                 prompt.reset_prediction(f"傳訊息給 {agent.display_name}...")
                 prompt.focus()
                 # turn 中途要求的換模型此時才生效，同步顯示
-                self.query_one("#sidebar", Sidebar).set_model(agent.profile.name)
-                self._update_subtitle()
-                self._sync_cap_bar()
+                self.refresh_agent_view()
                 if self.input_state.restore_input:
                     self.input_state.restore_input = False
                     restored = self.input_state.last_send_text

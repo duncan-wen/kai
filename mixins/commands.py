@@ -148,10 +148,9 @@ class CommandsMixin(_MixinBase):
 
     @slash("/debug", "切換工具除錯模式（顯示工具參數與回應）")
     async def _cmd_debug(self, arg: str) -> None:
-        self.ui_state.debug_tools = not self.ui_state.debug_tools
-        label = "🔧 開啟" if self.ui_state.debug_tools else "關閉"
+        self.debug_tools = not self.debug_tools
+        label = "🔧 開啟" if self.debug_tools else "關閉"
         self.notify(f"工具除錯模式：{label}", severity="information", timeout=3)
-        self._update_prompt_title()
 
     @slash("/think", "切換 Thinking 模式開／關")
     async def _cmd_think(self, arg: str) -> None:

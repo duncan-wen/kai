@@ -36,7 +36,7 @@ def _state_suffix(app: ChatApp, name: str) -> str:
     if name == "/think":
         return f"（{'開啟' if app._thinking_active() else '關閉'}）"
     if name == "/debug":
-        return f"（{'開啟' if app.ui_state.debug_tools else '關閉'}）"
+        return f"（{'開啟' if app.debug_tools else '關閉'}）"
     return ""
 
 

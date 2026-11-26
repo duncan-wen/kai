@@ -36,11 +36,26 @@ class InputState:
 
 @dataclass
 class UIState:
-    """UI 控制旗標與 spinner 狀態。"""
+    """不需要畫到畫面上的 UI 旗標（會顯示的狀態是 ChatApp 的 reactive）。"""
 
-    debug_tools: bool = False
     greeting_enabled: bool = True
-    think_override: bool | None = None
+
+
+@dataclass(frozen=True)
+class AgentView:
+    """作用中 Agent 的顯示快照：sidebar / cap-bar / prompt / subtitle 都從這裡畫。
+
+    ChatApp.agent_view 是 reactive；值相等就不觸發 watcher，所以重算很便宜。
+    """
+
+    display_name: str = ""
+    model: str = ""
+    supports_thinking: bool = False
+    supports_vision: bool = False
+    thinking_on: bool = False
+    mcp: tuple[tuple[str, int], ...] | None = None
+    """(server, 工具數)；None 代表 MCP 還在初始化。"""
+    session_name: str = ""
 
 
 @dataclass

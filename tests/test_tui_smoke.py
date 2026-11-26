@@ -73,11 +73,11 @@ def test_unknown_command_warns(app_factory) -> None:
 
 def test_debug_toggles(app_factory) -> None:
     async def body(app, pilot: Pilot) -> None:
-        before = app.ui_state.debug_tools
+        before = app.debug_tools
         await _submit(app, pilot, "/debug")
-        assert app.ui_state.debug_tools is not before
+        assert app.debug_tools is not before
         await _submit(app, pilot, "/debug")
-        assert app.ui_state.debug_tools is before
+        assert app.debug_tools is before
 
     _run(app_factory, body)
 
@@ -161,12 +161,12 @@ def test_command_palette_hits_run(app_factory) -> None:
         labels = [str(h.match_display) for h in hits]
         assert any(label.startswith("/debug") for label in labels)
         debug_hit = next(h for h in hits if str(h.match_display).startswith("/debug"))
-        before = app.ui_state.debug_tools
+        before = app.debug_tools
         result = debug_hit.command()
         if asyncio.iscoroutine(result):
             await result
         await pilot.pause()
-        assert app.ui_state.debug_tools is not before
+        assert app.debug_tools is not before
 
     _run(app_factory, body)
 
@@ -192,6 +192,8 @@ def test_prompt_spinner_animates_while_disabled(app_factory) -> None:
     async def body(app, pilot: Pilot) -> None:
         from widgets.input import SPINNER, HistoryInput, PromptSpinner
 
+        app.debug_tools = False
+        await pilot.pause()
         prompt = app.query_one("#prompt", HistoryInput)
         prompt.disabled = True
         spinner = PromptSpinner(prompt, "等待回覆").start()
@@ -203,6 +205,7 @@ def test_prompt_spinner_animates_while_disabled(app_factory) -> None:
         assert str(prompt.border_title)[0] in SPINNER
         spinner.stop()
         frozen = prompt.border_title
+        assert "❯" in str(frozen)  # stop 後恢復待機標題
         await pilot.pause(0.2)
         assert prompt.border_title == frozen
 
@@ -210,5 +213,82 @@ def test_prompt_spinner_animates_while_disabled(app_factory) -> None:
         await pilot.pause(0.2)
         assert "背景" not in str(prompt.border_title)
         hidden.stop()
+
+    _run(app_factory, body)
+
+
+def test_debug_mark_bound_to_prompt_title(app_factory) -> None:
+    """App.debug_tools 透過 data_bind 驅動 prompt 標題；spinner 執行中也帶 debug 標記。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.input import HistoryInput, PromptSpinner
+
+        prompt = app.query_one("#prompt", HistoryInput)
+        app.debug_tools = False
+        await pilot.pause()
+        assert "debug" not in str(prompt.border_title)
+        app.debug_tools = True
+        await pilot.pause()
+        assert "debug" in str(prompt.border_title)
+        spinner = PromptSpinner(prompt, "生成中").start()
+        app.debug_tools = False
+        await pilot.pause(0.2)
+        # spinner 執行中，debug_mark 改變不會蓋掉 spinner 標題
+        assert "生成中" in str(prompt.border_title)
+        assert "debug" not in str(prompt.border_title)
+        spinner.stop()
+
+    _run(app_factory, body)
+
+
+def test_agent_view_drives_cap_bar_sidebar_and_subtitle(app_factory) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from textual.widgets import Static
+
+        from core.app_state import AgentView
+
+        view = app.agent_view
+        assert view.model == app.agent.profile.name
+        assert view.mcp == ()  # MCP 停用 → 初始化完成且沒有 server
+        assert app.sub_title.startswith(view.display_name)
+        sidebar_model = app.query_one("#sb-model", Static)
+        assert str(sidebar_model.render()) == view.model
+        assert "未啟用" in str(app.query_one("#sb-mcp", Static).render())
+
+        think = app.query_one("#cap-think", Static)
+        vision = app.query_one("#cap-vision", Static)
+        assert vision.display is view.supports_vision
+
+        app.agent_view = AgentView(
+            display_name="測試",
+            model="x-model",
+            supports_thinking=True,
+            supports_vision=False,
+            thinking_on=True,
+            mcp=(("db", 3),),
+            session_name="s1",
+        )
+        await pilot.pause()
+        assert app.sub_title == "測試 · s1"
+        assert str(sidebar_model.render()) == "x-model"
+        assert "db" in str(app.query_one("#sb-mcp", Static).render())
+        assert think.has_class("cap-think-on")
+        assert not think.has_class("cap-inactive")
+        assert vision.display is False
+        assert app.query_one("#prompt").placeholder == "傳訊息給 測試..."
+
+    _run(app_factory, body)
+
+
+def test_think_toggle_via_cap_bar_click(app_factory) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        before = app._thinking_active()
+        await pilot.click("#cap-think")
+        await pilot.pause()
+        assert app._thinking_active() is not before
+        assert app.agent_view.thinking_on is not before
+        think = app.query_one("#cap-think")
+        if app.agent.profile.supports_thinking:
+            assert think.has_class("cap-think-on") is (not before)
 
     _run(app_factory, body)

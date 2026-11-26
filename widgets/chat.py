@@ -1,4 +1,4 @@
-"""Chat display widgets: ImageBubble, FileViewer, CopyButton, CapabilityBadge, CapLabel, AIMessage, ConfirmCloseScreen."""
+"""Chat display widgets: ImageBubble, FileViewer, CopyButton, CapBar, AIMessage, ConfirmCloseScreen."""
 
 from __future__ import annotations
 
@@ -7,15 +7,18 @@ import os
 import re
 from pathlib import Path
 
+from core.app_state import AgentView
 from core.config import USERNAME
 
 from rich.text import Text as RichText
-from textual import work
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual import events
 from textual.events import Click
+from textual.message import Message
+from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Button, Markdown, Static, Tab, TextArea
@@ -243,24 +246,36 @@ class CopyButton(Static):
             self.app.notify("複製失敗（需要 xclip 或 clip.exe）", severity="warning")
 
 
-class CapabilityBadge(Static):
-    """可點擊功能標籤（目前只有 think）。"""
+class CapBar(Horizontal):
+    """功能標籤列：think（可點擊切換）與 vision；畫面完全由 `view` 決定。
 
-    def __init__(self, key: str, label: str) -> None:
-        super().__init__(label, id=f"cap-{key}", classes="cap-badge")
-        self._key = key
+    ChatApp 用 data_bind 把 ChatApp.agent_view 綁進來；點 think 只送出
+    `ThinkToggled` 訊息，切換邏輯留在 App。
+    """
 
-    def on_click(self, event: events.Click) -> None:
+    class ThinkToggled(Message):
+        """使用者點了 think 標籤。"""
+
+    view: reactive[AgentView] = reactive(AgentView, init=False)
+
+    def compose(self) -> ComposeResult:
+        yield Static("think", id="cap-think", classes="cap-badge")
+        yield Static("vision", id="cap-vision", classes="cap-badge cap-label")
+
+    def on_mount(self) -> None:
+        self.watch_view(self.view)
+
+    def watch_view(self, view: AgentView) -> None:
+        think = self.query_one("#cap-think", Static)
+        think.set_class(view.thinking_on, "cap-think-on")
+        think.set_class(not view.supports_thinking, "cap-unsupported")
+        think.set_class(view.supports_thinking and not view.thinking_on, "cap-inactive")
+        self.query_one("#cap-vision", Static).display = view.supports_vision
+
+    @on(events.Click, "#cap-think")
+    def _on_think_clicked(self, event: events.Click) -> None:
         event.stop()
-        if self._key == "think":
-            self.app.action_toggle_think()  # type: ignore[attr-defined]
-
-
-class CapLabel(Static):
-    """純顯示功能標籤（vision 等）。"""
-
-    def __init__(self, key: str, label: str) -> None:
-        super().__init__(label, id=f"cap-{key}", classes="cap-badge cap-label")
+        self.post_message(self.ThinkToggled())
 
 
 class AIMessage(Widget):

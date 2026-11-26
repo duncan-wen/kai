@@ -21,8 +21,6 @@ from core.config import (
     reload_env,
 )
 from core.models import REGISTRY
-from widgets.input import HistoryInput
-from widgets.sidebar import Sidebar
 from widgets.tree import FileTree
 
 from typing import TYPE_CHECKING
@@ -60,9 +58,7 @@ class SessionMixin(_MixinBase):
         os.environ[key] = arg
         self.agent._rebuild_system_prompt()
         self.agent.save_history()
-        prompt = self.query_one("#prompt", HistoryInput)
-        prompt.placeholder = f"傳訊息給 {arg}..."
-        self.sub_title = arg
+        self.refresh_agent_view()
         self.notify(f"✅ {model} 暱稱設為「{arg}」", timeout=3)
 
     def _apply_project_config(self) -> None:
@@ -76,7 +72,7 @@ class SessionMixin(_MixinBase):
             self.agent.profile.num_ctx = int(cfg["num_ctx"])
         if "debug_tools" in cfg:
             v = cfg["debug_tools"]
-            self.ui_state.debug_tools = (
+            self.debug_tools = (
                 bool(v)
                 if isinstance(v, bool)
                 else str(v).lower() in ("1", "true", "yes")
@@ -115,7 +111,7 @@ class SessionMixin(_MixinBase):
         self._refresh_skills_sidebar()
         await self.query_one("#messages", VerticalScroll).remove_children()
         self._render_history()
-        self._update_subtitle()
+        self.refresh_agent_view()
         self.notify(f"已切換至 {target}", severity="information")
 
     async def action_compact(self) -> None:
@@ -150,11 +146,6 @@ class SessionMixin(_MixinBase):
         """
         return SessionStore((agent or self.agent)._history_file)
 
-    def _update_subtitle(self) -> None:
-        display = self.agent.display_name
-        name = self._session_store().name
-        self.sub_title = f"{display} · {name}" if name else display
-
     def _do_rename(self, arg: str) -> None:
         store = self._session_store()
         if not arg:
@@ -167,7 +158,7 @@ class SessionMixin(_MixinBase):
         except OSError as e:
             self.notify(f"命名失敗：{e}", severity="error")
             return
-        self._update_subtitle()
+        self.refresh_agent_view()
         hint = "已同步更新來源 archive" if to_archive else "封存時自動儲存"
         self.notify(f"Session 命名為「{arg}」，{hint}", timeout=3)
 
@@ -195,7 +186,7 @@ class SessionMixin(_MixinBase):
         agent.history = []
         agent._rebuild_system_prompt()
         agent.save_history()
-        self._update_subtitle()
+        self.refresh_agent_view()
         self.query_one("#file-tree", FileTree).refresh_tree()
 
     # ── /resume ──────────────────────────────────────────────────────────────
@@ -241,7 +232,7 @@ class SessionMixin(_MixinBase):
         await msgs.remove_children()
         agent.reset_history()
         await self._render_history_into(msgs, agent)
-        self._update_subtitle()
+        self.refresh_agent_view()
         name_display = store.name or archive.name
         self.notify(f"已載入：{name_display}（有新對話後才會重新封存）", timeout=4)
 
@@ -254,16 +245,12 @@ class SessionMixin(_MixinBase):
             self.notify("已是目前模型", severity="information")
             return f"已是 {model_name}"
         # 在原物件上換模型：agent tab 的 definition 設定、注入的工具都保留；只改記憶體，不寫回 config.json
-        self.ui_state.think_override = None
+        self.think_override = None
         if not self.agent.switch_model(model_name):
             # AI 在自己的 turn 中途要求換模型：這個 turn 跑完才生效（UI 在 turn 結束時同步）
             msg = f"✅ 這則回覆結束後改用 {model_name}"
             self.notify(msg, severity="information")
             return msg
-        self._sync_cap_bar()
-        prompt = self.query_one("#prompt", HistoryInput)
-        prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
-        self._update_subtitle()
-        self.query_one("#sidebar", Sidebar).set_model(model_name)
+        self.refresh_agent_view()
         self.notify(f"已切換至 {model_name}", severity="information")
         return f"✅ 已切換至 {model_name}"

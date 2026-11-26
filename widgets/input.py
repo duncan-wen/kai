@@ -8,8 +8,11 @@ from pathlib import Path
 
 from textual import events
 from textual.binding import Binding
+from textual.reactive import reactive
 from textual.widgets import Input
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
+
+from core.config import USERNAME
 
 from .slash import completion_items
 from .utils import _IMAGE_EXTS
@@ -21,26 +24,26 @@ SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 class PromptSpinner:
     """在 prompt 的 border_title 播放 spinner 動畫；`label` 可隨時改（例如「生成中」）。
 
-    `suffix` 每格動畫重算一次（例如 debug 標記）；`visible` 回傳 False 時這格不畫，
-    讓背景 tab 的工作不會蓋掉目前 tab 的標題。用法：`start()` 後在 finally 裡 `stop()`。
+    `visible` 回傳 False 時這格不畫，讓背景 tab 的工作不會蓋掉目前 tab 的標題。
+    debug 標記由 prompt 自己的 `debug_mark` 決定。用法：`start()` 後在 finally 裡 `stop()`；
+    stop 時若沒有其他 spinner 在跑，prompt 會恢復待機標題。
     """
 
     def __init__(
         self,
-        prompt: Input,
+        prompt: HistoryInput,
         label: str,
         *,
-        suffix: Callable[[], str] = lambda: "",
         visible: Callable[[], bool] = lambda: True,
     ) -> None:
         self.prompt = prompt
         self.label = label
-        self._suffix = suffix
         self._visible = visible
         self._idx = 0
         self._timer = None
 
     def start(self) -> PromptSpinner:
+        self.prompt._spinners.add(self)
         self._render()
         self._timer = self.prompt.set_interval(0.08, self._tick)
         return self
@@ -49,18 +52,25 @@ class PromptSpinner:
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+        self.prompt._spinners.discard(self)
+        if self._is_visible():
+            self.prompt.show_idle_title()
+
+    def _is_visible(self) -> bool:
+        try:
+            return self._visible()
+        except Exception:
+            return False
 
     def _tick(self) -> None:
         self._idx = (self._idx + 1) % len(SPINNER)
         self._render()
 
     def _render(self) -> None:
-        try:
-            if not self._visible():
-                return
-        except Exception:
-            return
-        self.prompt.border_title = f"{SPINNER[self._idx]} {self.label}{self._suffix()}"
+        if self._is_visible():
+            self.prompt.border_title = (
+                f"{SPINNER[self._idx]} {self.label}{self.prompt.debug_suffix}"
+            )
 
 
 class HistoryInput(Input):
@@ -89,13 +99,41 @@ class HistoryInput(Input):
     # 超過此字元數自動壓縮成 marker，避免 Input 出現 scroll-x
     _COMPRESS_THRESHOLD: int = 200
 
+    debug_mark: reactive[bool] = reactive(False, init=False)
+    """工具除錯模式；ChatApp 用 data_bind 綁到 ChatApp.debug_tools。"""
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._spinners: set[PromptSpinner] = set()
         self._undo_stack: list[tuple[str, int]] = []
         self._multiline_paste: str | None = None
         self._multiline_marker: str | None = None
         self._real_placeholder: str = ""  # saved when ghost text swaps placeholder
         self._pending_prediction: str = ""  # last prediction, for re-show on empty
+
+    # ── 標題 / placeholder ─────────────────────────────────────────────────────
+
+    @property
+    def debug_suffix(self) -> str:
+        return "  [dim]🔧 debug[/dim]" if self.debug_mark else ""
+
+    def show_idle_title(self) -> None:
+        """待機標題：使用者名稱 + debug 標記。"""
+        self.border_title = f"[bold]{USERNAME}[/bold] [dim]❯[/dim]{self.debug_suffix}"
+
+    def on_mount(self) -> None:
+        self.show_idle_title()
+
+    def watch_debug_mark(self) -> None:
+        if not self._spinners:
+            self.show_idle_title()
+
+    def set_base_placeholder(self, text: str) -> None:
+        """設定一般 placeholder；正在顯示 ghost text 預測時只更新被暫存的那份。"""
+        if self._real_placeholder:
+            self._real_placeholder = text
+        else:
+            self.placeholder = text
 
     # ── 長文字壓縮 ─────────────────────────────────────────────────────────────
 

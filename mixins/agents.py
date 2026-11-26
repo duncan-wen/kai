@@ -66,8 +66,6 @@ class AgentsMixin(_MixinBase):
         finally:
             spinner.stop()
             prompt.disabled = False
-            self._update_prompt_title()
-            prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
             prompt.focus()
 
     def _apply_definition(self, agent: "Agent", defn: "AgentDefinition") -> list[str]:
@@ -170,7 +168,6 @@ class AgentsMixin(_MixinBase):
         spinner = PromptSpinner(
             prompt,
             "等待回覆",
-            suffix=lambda: "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else "",
             visible=lambda: (
                 self.query_one("#center-tabs", TabbedContent).active == target_tab_id
             ),
@@ -229,7 +226,7 @@ class AgentsMixin(_MixinBase):
             is_err = tr.is_error
             icon = "❌" if is_err else ("⚠️" if tr.is_warn else "🔧")
             card_cls = "tool-debug tool-debug-error" if is_err else "tool-debug"
-            if not self.ui_state.debug_tools:
+            if not self.debug_tools:
                 if is_err:
                     await scroll.mount(
                         Collapsible(
@@ -291,7 +288,6 @@ class AgentsMixin(_MixinBase):
                 if self.query_one("#center-tabs", _TC3).active == target_tab_id:
                     prompt.disabled = False
                     prompt.remove_class("streaming")
-                    self._update_prompt_title()
                     prompt.focus()
             except Exception:
                 pass
@@ -353,7 +349,6 @@ class AgentsMixin(_MixinBase):
             spinner.stop()
             prompt.disabled = False
             if self.agent is agent:
-                self._update_prompt_title()
                 prompt.reset_prediction(f"傳訊息給 {agent.display_name}...")
                 prompt.focus()
 
@@ -384,18 +379,7 @@ class AgentsMixin(_MixinBase):
         self.agent.reset_history()
         name = defn.display_name
 
-        # 更新 UI
-        from widgets.sidebar import Sidebar
-        from widgets.input import HistoryInput
-
-        sidebar = self.query_one("#sidebar", Sidebar)
-        sidebar.set_model(self.agent.profile.name)
-        mcp_sum = self.agent.mcp_client.server_summary if self.agent.mcp_client else {}
-        sidebar.set_mcp(mcp_sum)
-        prompt = self.query_one("#prompt", HistoryInput)
-        prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
-        self._update_subtitle()
-        self._sync_cap_bar()
+        self.refresh_agent_view()
 
         # 重新渲染聊天畫面（history 可能已有增減）
         msgs = self._active_msgs()
