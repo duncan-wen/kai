@@ -34,7 +34,7 @@ app.py              → Textual TUI; ChatApp composes all mixins
 core/
   agent.py          → Agent class: history, system prompt, model switch, tool schemas, commit
   turn.py           → run_turn: the tool-call loop as typed events (ThinkingDone / Token / ToolEvent / Done …)
-  model_stream.py   → ModelStream seam: CancelToken, Delta, ToolCall, AssistantStep, make_model_stream
+  model_stream.py   → ModelStream seam: CancelToken, Delta, ToolCall, Usage, AssistantStep, make_model_stream
   agent_factory.py  → /create-agent, /load-agent, /list-agents logic (AI-based agent design)
   agent_registry.py → AgentRegistry: sole owner of main agent + agent tabs (tab ids, active agent, name lookup, MCP distribution); ChatApp.agent = agents.active
   backends.py       → OllamaStream / OpenAICompatStream adapters (wire format, lazy SDK clients, Langfuse generation)
@@ -261,16 +261,17 @@ When pasting multiline text into the prompt:
 
 `run_turn(agent, TurnRequest(user_msg, persist, think), sink, cancel) -> Done` runs one turn:
 
-1. Takes `agent._chat_lock` and `agent.turn_scope()` (a mid-turn `switch_model` applies after the turn)
+1. Takes `agent.turn_lock` and `agent.turn_scope()` (a mid-turn `switch_model` applies after the turn); `agent.prepare_turn()` rebuilds the system prompt
 2. Each step calls `agent.model_stream.step(...)`; tool calls run concurrently, results go back as `tool` messages
 3. Events go to `sink`: `ThinkingDone`, `Token` (text already stripped of `<next>`), `StepReset`, `ToolEvent`, `Compacting` / `Compacted`, then exactly one `Done(reason, reply, stats, prediction, error, new_messages)`
 4. History is committed once at the end (`persist`: `all` / `reply_only` / `none`); errors and cancels leave it untouched
-5. Model/backend errors never raise — they become `Done(reason="error", error=TurnError(kind))`, kind `overflow` / `timeout` / `quota` / `other`; overflow triggers one compact + retry of the same message
+5. Model/backend errors never raise — they become `Done(reason="error", error=TurnError(kind))`, kind `overflow` / `timeout` / `quota` / `other`; overflow triggers one compact + retry of the same message, continuing from the tool steps already done (tools are not re-run)
 6. Bad tool-argument JSON is returned to the model as an error `ToolResult`; `MAX_TOOL_CALLS` ends with `Done(tool_limit)`
+7. Cancel during tool execution waits for the batch, still emits its `ToolEvent`s, then ends with `Done(cancelled)`
 
 Backend differences live behind the `ModelStream` seam (`core/model_stream.py`); the turn uses a neutral message format and adapters in `core/backends.py` convert it to wire format. Tests swap in `tests/fake_model.py::FakeModel` via `agent.model_stream = FakeModel([...])`.
 
-UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with their own sink. Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `agent.commit(done.new_messages)`.
+UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with their own sink. Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `await agent.commit(done.new_messages)`. Call `mark_busy` immediately before the `try` whose `finally` unmarks it.
 
 ### History
 

@@ -32,6 +32,7 @@ from .model_stream import (
     OnDelta,
     QuotaError,
     ToolCall,
+    Usage,
 )
 from .tools import clean_thinking
 
@@ -82,15 +83,8 @@ def openai_client(backend: str) -> "AsyncOpenAI | None":
 # ── 中立訊息 → wire ────────────────────────────────────────────────────────────
 
 
-def _args_str(arguments: str | dict) -> str:
-    if isinstance(arguments, str):
-        return arguments
-    return json.dumps(arguments, ensure_ascii=False)
-
-
-def _args_dict(arguments: str | dict) -> dict:
-    if isinstance(arguments, dict):
-        return arguments
+def _args_dict(arguments: str) -> dict:
+    """Ollama wire 要 dict；壞 JSON（模型自己吐的）送回時當成無參數。"""
     try:
         parsed = json.loads(arguments)
     except (json.JSONDecodeError, TypeError):
@@ -161,7 +155,7 @@ def to_openai_messages(messages: list[dict], *, keeps_reasoning: bool) -> list[d
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": _args_str(tc.arguments),
+                            "arguments": tc.arguments,
                         },
                     }
                     for tc in calls
@@ -296,7 +290,7 @@ class OllamaStream:
             "top_k": _cfg.TOP_K,
             "top_p": _cfg.TOP_P,
         }
-        step = AssistantStep(num_ctx=p.num_ctx)
+        step = AssistantStep(usage=Usage(num_ctx=p.num_ctx))
         text: list[str] = []
         thinking: list[str] = []
         raw_calls: list = []
@@ -336,9 +330,9 @@ class OllamaStream:
                                 break
                             msg = chunk.message
                             if getattr(chunk, "eval_count", None) is not None:
-                                step.gen_tokens = chunk.eval_count
+                                step.usage.gen_tokens = chunk.eval_count
                             if getattr(chunk, "prompt_eval_count", None) is not None:
-                                step.prompt_tokens = chunk.prompt_eval_count
+                                step.usage.prompt_tokens = chunk.prompt_eval_count
                             if first_token_at is None and (
                                 msg.thinking or msg.content or msg.tool_calls
                             ):
@@ -371,7 +365,7 @@ class OllamaStream:
                         output=generation_output("".join(text), raw_calls),
                         metadata=_generation_metadata(p.backend, "".join(thinking)),
                         usage_details=_usage_details(
-                            (step.gen_tokens, step.prompt_tokens)
+                            (step.usage.gen_tokens, step.usage.prompt_tokens)
                         ),
                         completion_start_time=first_token_at,
                     )
@@ -381,7 +375,7 @@ class OllamaStream:
             ToolCall(
                 id=f"call_{i}",
                 name=tc.function.name,
-                arguments=tc.function.arguments,
+                arguments=json.dumps(tc.function.arguments or {}, ensure_ascii=False),
             )
             for i, tc in enumerate(raw_calls)
         ]
@@ -455,11 +449,11 @@ class OpenAICompatStream:
                     if cancel.cancelled:
                         break
                     if chunk.usage:
-                        step.gen_tokens = chunk.usage.completion_tokens
-                        step.prompt_tokens = chunk.usage.prompt_tokens
+                        step.usage.gen_tokens = chunk.usage.completion_tokens
+                        step.usage.prompt_tokens = chunk.usage.prompt_tokens
                         hit = _cache_hit(chunk.usage)
                         if hit is not None:
-                            step.cache_hit = hit
+                            step.usage.cache_hit = hit
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
@@ -494,7 +488,8 @@ class OpenAICompatStream:
                         output=generation_output(step.text, wire_calls),
                         metadata=_generation_metadata(p.backend, step.thinking),
                         usage_details=_usage_details(
-                            (step.gen_tokens, step.prompt_tokens), step.cache_hit
+                            (step.usage.gen_tokens, step.usage.prompt_tokens),
+                            step.usage.cache_hit,
                         ),
                         completion_start_time=first_token_at,
                     )

@@ -18,7 +18,7 @@
 | 函式、變數、模組 | `snake_case` | `run_tool`, `tool_names` |
 | 類別 | `PascalCase` | `MCPClient`, `ModelProfile` |
 | 常數（模組層級） | `UPPER_SNAKE` | `MAX_TOOL_CALLS`, `SEARCH_TOOL` |
-| 私有 / 內部方法 | `_` 前綴 | `_reset_date`, `_cancelled` |
+| 私有 / 內部方法 | `_` 前綴 | `_reset_date`, `_trim_history` |
 | 停用的 MCP server | `_` 前綴（於 mcp_servers.json）| `_playwright` |
 
 ## 程式碼風格
@@ -34,10 +34,12 @@
 ```
 app.py          → TUI 入口點（ChatApp 組合所有 mixin）
 core/           → 業務邏輯（與 UI 無關）
-  agent.py      → Agent, 對話歷史, 工具呼叫迴圈
+  agent.py      → Agent：對話歷史、system prompt、換模型、工具 schema、commit
+  turn.py       → run_turn：工具呼叫迴圈，以型別化事件送給 UI
+  model_stream.py → ModelStream seam：CancelToken、Delta、ToolCall、Usage、AssistantStep
   agent_factory.py → /create-agent 邏輯，agents/ 目錄管理
   app_state.py  → InputState, SessionState, UIState, TabState
-  backends.py   → stream_ollama / stream_openai_compat
+  backends.py   → OllamaStream / OpenAICompatStream adapter（wire 格式、SDK client 快取）
   config.py     → 所有 env-var 常數
   models.py     → ModelProfile dataclass + REGISTRY
   session_store.py → SessionStore：session 封存／resume／命名（狀態只在磁碟上）

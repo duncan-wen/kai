@@ -167,7 +167,6 @@ class AgentsMixin(_MixinBase):
 
         # 目標 tab 標成忙碌：使用者在（或切到）那個 tab 時 prompt 會鎖住
         cancel = CancelToken()
-        self.mark_busy(target_tab_id, cancel)
         prompt = self.query_one("#prompt", HistoryInput)
 
         # spinner：只在目標 agent 的 tab 是目前 tab 時才畫
@@ -175,17 +174,8 @@ class AgentsMixin(_MixinBase):
             prompt,
             "等待回覆",
             visible=lambda: self.active_tab == target_tab_id,
-        ).start()
-
-        preview = content[:300] + ("…" if len(content) > 300 else "")
-        await scroll.mount(
-            Collapsible(
-                _Static(preview, markup=False),
-                title=f"📨 來自 {sender}",
-                collapsed=True,
-                classes="inbox-bubble",
-            )
         )
+        preview = content[:300] + ("…" if len(content) > 300 else "")
         stream_msg: "AIMessage | None" = None
         cur_text = ""
 
@@ -280,7 +270,18 @@ class AgentsMixin(_MixinBase):
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
         # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
         self._session_store(agent).mark_active()
+        # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
+        self.mark_busy(target_tab_id, cancel)
         try:
+            spinner.start()
+            await scroll.mount(
+                Collapsible(
+                    _Static(preview, markup=False),
+                    title=f"📨 來自 {sender}",
+                    collapsed=True,
+                    classes="inbox-bubble",
+                )
+            )
             await run_turn(
                 agent,
                 TurnRequest(
@@ -311,17 +312,18 @@ class AgentsMixin(_MixinBase):
         prompt = self.query_one("#prompt", HistoryInput)
         my_tab = self.agents.tab_id_of(agent) or self.active_tab
         cancel = CancelToken()
-        self.mark_busy(my_tab, cancel)
         spinner = PromptSpinner(
             prompt,
             f"{agent.display_name} 開場中…",
             visible=lambda: self.active_tab == my_tab,
-        ).start()
+        )
         stream_msg: AIMessage | None = None
+        cur_text = ""
 
         async def sink(ev: TurnEvent) -> None:
-            nonlocal stream_msg
+            nonlocal stream_msg, cur_text
             if isinstance(ev, Token):
+                cur_text = ev.text
                 if stream_msg is None:
                     await scroll.mount(
                         _Static(
@@ -336,15 +338,19 @@ class AgentsMixin(_MixinBase):
                 scroll.scroll_end(animate=False)
             elif isinstance(ev, Done):
                 if stream_msg is not None:
+                    # 取消 / 錯誤時保留已顯示的文字（和 dispatch 一致）
                     await stream_msg.update_content(
-                        ev.reply if ev.reason == "complete" else "", final=True
+                        ev.reply if ev.reason == "complete" else cur_text, final=True
                     )
                 if ev.reason == "error":
                     self.notify(
                         f"greeting 失敗：{ev.error.message}", severity="warning"
                     )
 
+        # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
+        self.mark_busy(my_tab, cancel)
         try:
+            spinner.start()
             # trigger 訊息不存入 history，只保留 assistant 開場白
             await run_turn(
                 agent,
@@ -366,7 +372,7 @@ class AgentsMixin(_MixinBase):
         """重新從 config.json 熱更新執行中的 agent：system_prompt、model、nickname 全部套用。
         若 history.json 已被刪除，同步清除 in-memory history（否則 save_history 會把舊記憶寫回）。
         """
-        adir = self.agent._agent_dir
+        adir = self.agent.agent_dir
         if not adir:
             self.notify(
                 "目前 agent 沒有 config.json（主 chat 不支援此指令）",

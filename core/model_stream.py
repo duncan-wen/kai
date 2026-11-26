@@ -44,11 +44,22 @@ class Delta:
 
 @dataclass(frozen=True)
 class ToolCall:
-    """模型要求的一次工具呼叫。`arguments` 保留後端原樣（Ollama 給 dict、OpenAI 給 JSON 字串）。"""
+    """模型要求的一次工具呼叫。`arguments` 一律是模型給的原始 JSON 字串（adapter 負責正規化）。"""
 
     id: str
     name: str
-    arguments: str | dict
+    arguments: str
+
+
+@dataclass
+class Usage:
+    """一次模型呼叫的 token 用量；adapter 串流時逐步填入。"""
+
+    gen_tokens: int | None = None
+    prompt_tokens: int | None = None
+    cache_hit: int | None = None
+    # 後端回報的 context window；只有會把 prompt 塞進固定 window 的後端（Ollama）才填
+    num_ctx: int | None = None
 
 
 @dataclass
@@ -58,11 +69,7 @@ class AssistantStep:
     text: str = ""
     thinking: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
-    gen_tokens: int | None = None
-    prompt_tokens: int | None = None
-    cache_hit: int | None = None
-    # 後端回報的 context window；只有會把 prompt 塞進固定 window 的後端（Ollama）才填
-    num_ctx: int | None = None
+    usage: Usage = field(default_factory=Usage)
 
 
 class QuotaError(Exception):

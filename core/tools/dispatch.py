@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING
+
 from loguru import logger
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from ..mcp_client import MCPClient
 
 from .result import ToolResult
 from .web import WebSearchArgs
@@ -61,7 +66,10 @@ SUBAGENT_DISPATCH_TOOLS = {"send_to_agent"}
 
 
 async def run_tool(
-    fn_name: str, raw: dict, tools_map: dict, mcp_client=None
+    fn_name: str,
+    raw: dict,
+    tools_map: dict,
+    mcp_client: "MCPClient | None" = None,
 ) -> ToolResult:
     """由工具對映表動態分發；MCP tool 優先，其次本地 tools_map。
 

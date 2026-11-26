@@ -44,23 +44,24 @@ def format_stats(stats: TurnStats) -> str:
     if stats.thinking_s:
         parts.append(f"思考 {stats.thinking_s:.1f}s")
     parts.append(f"共 {stats.elapsed:.1f}s")
-    if stats.gen_tokens:
-        parts.append(f"{stats.gen_tokens} tokens")
-    prompt_tok = stats.prompt_tokens
+    u = stats.usage
+    if u.gen_tokens:
+        parts.append(f"{u.gen_tokens} tokens")
+    prompt_tok = u.prompt_tokens
     if prompt_tok:
-        if stats.num_ctx:
-            pct = prompt_tok * 100 // stats.num_ctx
-            parts.append(f"ctx {pct}% ({prompt_tok}/{stats.num_ctx})")
+        if u.num_ctx:
+            pct = prompt_tok * 100 // u.num_ctx
+            parts.append(f"ctx {pct}% ({prompt_tok}/{u.num_ctx})")
         else:
             parts.append(f"輸入 {prompt_tok} tokens")
-        if stats.cache_hit is not None:
-            parts.append(f"cache {stats.cache_hit * 100 // prompt_tok}%")
+        if u.cache_hit is not None:
+            parts.append(f"cache {u.cache_hit * 100 // prompt_tok}%")
     return " · ".join(parts)
 
 
 _ERROR_PREFIX = {
     "timeout": "⏱ 模型無回應（逾時）：",
-    "overflow": "❌ Context 已滿，壓縮後仍失敗：",
+    "overflow": "❌ Context 已滿：",
     "quota": "❌ ",
     "other": "❌ 錯誤：",
 }
@@ -97,12 +98,9 @@ class StreamingMixin(_MixinBase):
             self._session_store(agent).mark_active()
 
         cancel = CancelToken()
-        # 只在送出時的 tab 上畫：切到別的 tab 時不蓋掉那邊的標題
-        self.mark_busy(_my_tab_id, cancel)
         spinner = PromptSpinner(
             prompt, "等待回覆", visible=lambda: self.active_tab == _my_tab_id
-        ).start()
-        prompt.placeholder = ""
+        )
 
         def _at_bottom() -> bool:
             return msgs.scroll_y >= msgs.max_scroll_y - 3
@@ -263,7 +261,12 @@ class StreamingMixin(_MixinBase):
                 done = ev
                 await on_done(ev)
 
+        # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
+        self.mark_busy(_my_tab_id, cancel)
         try:
+            # 只在送出時的 tab 上畫：切到別的 tab 時不蓋掉那邊的標題
+            spinner.start()
+            prompt.placeholder = ""
             user_msg: dict = {"role": "user", "content": text}
             if images:
                 user_msg["images"] = images
