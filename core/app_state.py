@@ -41,8 +41,6 @@ class UIState:
     debug_tools: bool = False
     greeting_enabled: bool = True
     think_override: bool | None = None
-    spin_idx: int = 0
-    spin_label: str = "生成中"
 
 
 @dataclass

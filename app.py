@@ -33,23 +33,22 @@ from core.app_state import InputState, SessionState, TabState, UIState
 import core.config as _kai_cfg
 from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
 from core.mcp_client import MCPClient, load_mcp_servers
-from core.models import REGISTRY
 from core.skills import discover_skills
 from mixins.agents import AgentsMixin
 from mixins.app_tools import AppToolsMixin
+from mixins.commands import CommandsMixin
 from mixins.bash import BashMixin
 from mixins.mcp import MCPMixin
 from mixins.skills import SkillsMixin
 from mixins.session import SessionMixin
 from mixins.streaming import StreamingMixin
-from textual_fspicker import FileOpen, Filters, SelectDirectory
+from textual_fspicker import FileOpen, Filters
 from widgets.chat import (
     AIMessage,
     CapabilityBadge,
     CapLabel,
     ConfirmCloseScreen,
     FileViewer,
-    ImageBubble,
 )
 from widgets.commands import ChatCommands
 from widgets.input import ChatAutoComplete, HistoryInput
@@ -134,6 +133,7 @@ class AgentMessage(Message):
 
 
 class ChatApp(
+    CommandsMixin,
     MCPMixin,
     SkillsMixin,
     AgentsMixin,
@@ -161,8 +161,6 @@ class ChatApp(
         ),
         Binding("escape", "cancel_stream", "取消", priority=True),
     ]
-
-    SLASH_COMMANDS: list[tuple[str, str]] = []
 
     def __init__(self) -> None:
         super().__init__()
@@ -245,55 +243,6 @@ class ChatApp(
         self.query_one("#prompt", HistoryInput).focus()
         self._update_prompt_title()
         self._render_history()
-        self.__class__.SLASH_COMMANDS = [
-            ("/clear", "清除畫面"),
-            ("/ask", "臨時提問，不污染對話歷史  /ask <問題>"),
-            ("/save", "將上一次 /ask 的回答存入對話歷史"),
-            ("/cls", "清除記憶並封存（可 /resume 恢復）"),
-            ("/resume", "列出 archive  /resume [編號]"),
-            ("/remember", "記住規則  /remember <內容>"),
-            ("/compact", "用 Gemini 壓縮對話歷史（釋放 context）"),
-            ("/image", "傳送圖片給模型  /image <路徑> [問題]"),
-            ("/debug", "切換工具除錯模式（顯示工具參數與回應）"),
-            ("/think", "切換 Thinking 模式開／關"),
-            ("/cd", "切換工作目錄  /cd <路徑>"),
-            ("/mcp-list", "列出所有 MCP server 與工具說明"),
-            ("/mcp-reload", "重新載入 MCP servers（不需重啟）"),
-            (
-                "/mcp-add",
-                "新增 MCP server  /mcp-add <name> <cmd> [args...]  或  /mcp-add <name> --url <url>",
-            ),
-            ("/mcp-del", "移除 MCP server  /mcp-del <name>"),
-            ("/skills", "列出所有可用 skill 與觸發時機"),
-            ("/rename", "命名目前 session  /rename <名稱>"),
-            ("/nickname", "查詢或設定目前模型的暱稱  /nickname [名字]"),
-            ("/create-agent", "用 AI 設計新 agent  /create-agent [--global] <描述>"),
-            ("/load-agent", "載入 agent 設定  /load-agent <name> [name2 ...]"),
-            ("/list-agents", "列出所有已建立的 agents"),
-            (
-                "/reload-agent",
-                "重新載入目前 agent 的 config.json（system prompt 熱更新）",
-            ),
-            ("/delete-agent", "刪除 agent  /delete-agent [name]（省略 name 開面板選）"),
-            (
-                "/close-agent",
-                "關閉 agent tab  /close-agent [name]（省略 name 關目前 tab）",
-            ),
-            ("/reload-config", "重新載入 .kai/config.json 並套用所有設定"),
-            ("/init-config", "互動式 config 面板：選取 key，L→local G→global 匯出"),
-            (
-                "/tts",
-                "切換 TTS 引擎  /tts <edge-tts|azure-tts|melotts|kokoro-api|kokoro|off>",
-            ),
-            ("/tts edge-tts", "切換 TTS 為 edge-tts（雲端）"),
-            ("/tts azure-tts", "切換 TTS 為 Azure Cognitive Services TTS"),
-            ("/tts melotts", "切換 TTS 為 melotts（Docker 8886）"),
-            ("/tts kokoro-api", "切換 TTS 為 kokoro-api（Docker 8885）"),
-            ("/tts kokoro", "切換 TTS 為 kokoro（本地 ONNX）"),
-            ("/tts off", "關閉 TTS 語音"),
-            ("/greeting on", "開啟 agent 開場白"),
-            ("/greeting off", "關閉 agent 開場白"),
-        ] + [(f"/model {m}", f"切換到 {m}") for m in REGISTRY]
         self._sync_cap_bar()
         self.set_interval(15, lambda: self.query_one("#sidebar", Sidebar).refresh_git())
         self._mcp_done = asyncio.Event()
@@ -480,7 +429,6 @@ class ChatApp(
     @on(events.Click, "#attach-btn")
     async def _on_attach_clicked(self, event: events.Click) -> None:
         event.stop()
-        from textual_fspicker import FileOpen, Filters
 
         _filters = Filters(
             (
@@ -580,185 +528,7 @@ class ChatApp(
             return
 
         if text.startswith("/"):
-            parts = text.split(maxsplit=1)
-            cmd = parts[0].lower()
-            arg = parts[1].strip() if len(parts) > 1 else ""
-            if cmd == "/ask":
-                if not arg:
-                    self.notify("用法：/ask <問題>", severity="warning")
-                else:
-                    self._send(arg, ephemeral=True)
-            elif cmd == "/save":
-                if not self.input_state.last_ephemeral:
-                    self.notify("沒有可保存的 /ask 回答", severity="warning")
-                else:
-                    # 存入的 /ask 回答算新對話：session 不再是 resumed session
-                    self._session_store().mark_active()
-                    self.agent.history.extend(self.input_state.last_ephemeral)
-                    self.agent.save_history()
-                    self.input_state.last_ephemeral = None
-                    self.notify("已存入對話歷史", timeout=2)
-            elif cmd == "/clear":
-                await self.action_clear_screen()
-            elif cmd == "/cls":
-                await self.action_clear()
-            elif cmd == "/resume":
-                await self._handle_resume(arg)
-            elif cmd == "/remember":
-                if not arg:
-                    self.notify("用法：/remember <要記住的內容>", severity="warning")
-                else:
-                    notes_root = self.agent._agent_dir or Path(os.getcwd()) / ".kai"
-                    notes_root.mkdir(parents=True, exist_ok=True)
-                    notes_path = notes_root / "notes.md"
-                    existing = (
-                        notes_path.read_text(encoding="utf-8")
-                        if notes_path.exists()
-                        else ""
-                    )
-                    if f"- {arg}" in existing:
-                        self.notify(
-                            "已存在相同記錄，略過", severity="warning", timeout=3
-                        )
-                    else:
-                        with open(notes_path, "a", encoding="utf-8") as _f:
-                            _f.write(f"\n- {arg}")
-                        self.agent._rebuild_system_prompt()
-                        self.notify("✅ 已記錄到 .kai/notes.md", severity="information")
-                        self.query_one("#file-tree", FileTree).refresh_tree()
-            elif cmd == "/compact":
-                await self.action_compact()
-            elif cmd == "/model" and arg:
-                await self.action_switch_model(arg)
-            elif cmd == "/model":
-                self.notify("用法：/model <模型名稱>", severity="warning")
-            elif cmd == "/debug":
-                self.ui_state.debug_tools = not self.ui_state.debug_tools
-                label = "🔧 開啟" if self.ui_state.debug_tools else "關閉"
-                self.notify(f"工具除錯模式：{label}", severity="information", timeout=3)
-                self._update_prompt_title()
-            elif cmd == "/think":
-                self.action_toggle_think()
-            elif cmd == "/cd":
-                if arg:
-                    try:
-                        await self._do_cd(arg)
-                    except Exception as e:
-                        self.notify(f"切換失敗：{e}", severity="error")
-                else:
-
-                    async def _on_dir_selected(path: Path | None) -> None:
-                        if path:
-                            try:
-                                await self._do_cd(str(path))
-                            except Exception as e:
-                                self.notify(f"切換失敗：{e}", severity="error")
-
-                    self.push_screen(
-                        SelectDirectory(os.getcwd(), title="切換目錄"),
-                        callback=_on_dir_selected,
-                    )
-            elif cmd == "/mcp-list":
-                await self._do_mcp_list()
-            elif cmd == "/mcp-reload":
-                await self._do_mcp_reload()
-            elif cmd == "/mcp-add":
-                await self._do_mcp_add(arg)
-            elif cmd == "/mcp-del":
-                await self._do_mcp_del(arg)
-            elif cmd == "/skills":
-                await self._do_skills_list()
-            elif cmd == "/rename":
-                self._do_rename(arg)
-            elif cmd == "/nickname":
-                self._do_nickname(arg)
-            elif cmd == "/create-agent":
-                if not arg:
-                    self.notify("用法：/create-agent <描述>", severity="warning")
-                else:
-                    self._do_create_agent(arg)
-            elif cmd == "/load-agent":
-                if not arg:
-                    self.notify(
-                        "用法：/load-agent <name> [name2 ...]", severity="warning"
-                    )
-                else:
-                    for _ag_name in arg.split():
-                        await self._do_load_agent(_ag_name)
-            elif cmd == "/list-agents":
-                await self._do_list_agents()
-            elif cmd == "/reload-agent":
-                await self._do_reload_agent()
-            elif cmd == "/delete-agent":
-                await self._do_delete_agent(arg)
-            elif cmd == "/close-agent":
-                await self._app_close_agent(arg)
-            elif cmd == "/reload-config":
-                await self.action_reload_config()
-            elif cmd == "/init-config":
-                await self.action_init_config(arg)
-            elif cmd == "/image":
-                if not self.agent.profile.supports_vision:
-                    self.notify(
-                        f"{self.agent.profile.name} 不支援圖片輸入", severity="error"
-                    )
-                elif not arg:
-                    _img_filters = Filters(
-                        (
-                            "圖片",
-                            lambda p: (
-                                p.suffix.lower()
-                                in {
-                                    ".png",
-                                    ".jpg",
-                                    ".jpeg",
-                                    ".gif",
-                                    ".webp",
-                                    ".bmp",
-                                }
-                            ),
-                        ),
-                    )
-
-                    async def _on_image_selected(path: Path | None) -> None:
-                        if path:
-                            prompt.value = f"/image {path} "
-                            prompt.cursor_position = len(prompt.value)
-                            prompt.focus()
-
-                    self.push_screen(
-                        FileOpen(os.getcwd(), title="選擇圖片", filters=_img_filters),
-                        callback=_on_image_selected,
-                    )
-                else:
-                    img_parts = arg.split(" ", 1)
-                    img_path = img_parts[0].strip()
-                    question = (
-                        img_parts[1].strip() if len(img_parts) > 1 else "請分析這張圖片"
-                    )
-                    p = Path(img_path).expanduser().resolve()
-                    if not p.exists():
-                        self.notify(f"找不到圖片：{img_path}", severity="error")
-                    else:
-                        msgs = self._active_msgs()
-                        await msgs.mount(ImageBubble(str(p), question))
-                        msgs.scroll_end(animate=False)
-                        self._send(question, images=[str(p)])
-            elif cmd == "/tts":
-                self._do_tts_switch(arg)
-            elif cmd == "/greeting":
-                val = arg.strip().lower()
-                if val in ("on", "off"):
-                    self.ui_state.greeting_enabled = val == "on"
-                    label = "開啟" if self.ui_state.greeting_enabled else "關閉"
-                    self.notify(f"Greeting：{label}", severity="information", timeout=3)
-                else:
-                    state = "開啟" if self.ui_state.greeting_enabled else "關閉"
-                    self.notify(
-                        f"用法：/greeting on|off（目前：{state}）", severity="warning"
-                    )
-            else:
-                self.notify(f"未知指令：{cmd}", severity="warning")
+            await self.run_slash(text)
             return
 
         msgs = self._active_msgs()

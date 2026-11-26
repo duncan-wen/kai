@@ -12,7 +12,7 @@ from textual.widgets import Collapsible, Markdown, Static
 
 
 from widgets.chat import AIMessage
-from widgets.input import HistoryInput
+from widgets.input import HistoryInput, PromptSpinner
 from widgets.sidebar import Sidebar
 from widgets.tree import FileTree
 
@@ -23,8 +23,6 @@ if TYPE_CHECKING:
     from core.tools.result import ToolResult
 else:
     _MixinBase = object  # type: ignore[assignment,misc]
-
-SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 class StreamingMixin(_MixinBase):
@@ -57,20 +55,13 @@ class StreamingMixin(_MixinBase):
             # 有新訊息代表已脫離 resume 快照
             self._session_store(agent).mark_active()
         _history_snapshot = [m.copy() for m in agent.history] if ephemeral else None
-        self.ui_state.spin_idx = 0
-        self.ui_state.spin_label = "等待回覆"
-
-        def _tick() -> None:
-            self.ui_state.spin_idx = (self.ui_state.spin_idx + 1) % len(SPINNER)
-            dbg = "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else ""
-            prompt.border_title = (
-                f"{SPINNER[self.ui_state.spin_idx]} {self.ui_state.spin_label}{dbg}"
-            )
-
-        timer = self.set_interval(0.08, _tick)
+        spinner = PromptSpinner(
+            prompt,
+            "等待回覆",
+            suffix=lambda: "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else "",
+        ).start()
         self.tab_state.streaming_tabs.add(_my_tab_id)
         prompt.add_class("streaming")
-        prompt.border_title = f"{SPINNER[0]} 等待回覆"
         prompt.disabled = True
         prompt.placeholder = ""
 
@@ -82,7 +73,7 @@ class StreamingMixin(_MixinBase):
             _last_render: float = 0.0
 
             async def on_thinking(content: str) -> None:
-                self.ui_state.spin_label = "思考中"
+                spinner.label = "思考中"
                 preview = content[:2000] + ("…" if len(content) > 2000 else "")
                 await msgs.mount(
                     Collapsible(
@@ -96,7 +87,7 @@ class StreamingMixin(_MixinBase):
 
             async def on_token(chunk: str) -> None:
                 nonlocal stream_msg, _last_render
-                self.ui_state.spin_label = "生成中"
+                spinner.label = "生成中"
                 buf.append(chunk)
                 if stream_msg is None:
                     await msgs.mount(
@@ -197,7 +188,7 @@ class StreamingMixin(_MixinBase):
 
             async def on_tool_call(name: str, args: dict, tr: "ToolResult") -> None:
                 nonlocal stream_msg, buf
-                self.ui_state.spin_label = "工具回應中"
+                spinner.label = "工具回應中"
                 if stream_msg and buf:
                     _pre = re.sub(
                         r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=re.DOTALL
@@ -357,7 +348,7 @@ class StreamingMixin(_MixinBase):
                 msgs.scroll_end(animate=False)
 
         finally:
-            timer.stop()
+            spinner.stop()
             self.tab_state.streaming_tabs.discard(_my_tab_id)
             # 確認用戶目前是否還在這個 tab
             try:

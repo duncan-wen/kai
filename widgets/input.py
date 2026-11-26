@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from textual import events
@@ -10,7 +11,56 @@ from textual.binding import Binding
 from textual.widgets import Input
 from textual_autocomplete import AutoComplete, DropdownItem, TargetState
 
+from .slash import completion_items
 from .utils import _IMAGE_EXTS
+
+
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class PromptSpinner:
+    """在 prompt 的 border_title 播放 spinner 動畫；`label` 可隨時改（例如「生成中」）。
+
+    `suffix` 每格動畫重算一次（例如 debug 標記）；`visible` 回傳 False 時這格不畫，
+    讓背景 tab 的工作不會蓋掉目前 tab 的標題。用法：`start()` 後在 finally 裡 `stop()`。
+    """
+
+    def __init__(
+        self,
+        prompt: Input,
+        label: str,
+        *,
+        suffix: Callable[[], str] = lambda: "",
+        visible: Callable[[], bool] = lambda: True,
+    ) -> None:
+        self.prompt = prompt
+        self.label = label
+        self._suffix = suffix
+        self._visible = visible
+        self._idx = 0
+        self._timer = None
+
+    def start(self) -> PromptSpinner:
+        self._render()
+        self._timer = self.prompt.set_interval(0.08, self._tick)
+        return self
+
+    def stop(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+
+    def _tick(self) -> None:
+        self._idx = (self._idx + 1) % len(SPINNER)
+        self._render()
+
+    def _render(self) -> None:
+        try:
+            if not self._visible():
+                return
+        except Exception:
+            return
+        self.prompt.border_title = f"{SPINNER[self._idx]} {self.label}{self._suffix()}"
 
 
 class HistoryInput(Input):
@@ -249,10 +299,9 @@ class ChatAutoComplete(AutoComplete):
         if text.startswith("/cd "):
             return self._dir_items(text[4:])
         if text.startswith("/"):
-            cmds = getattr(self.app, "SLASH_COMMANDS", [])
             return [
                 DropdownItem(main=cmd)
-                for cmd, desc in cmds
+                for cmd, _desc in completion_items()
                 if text == "/" or cmd.startswith(text) or text[1:] in cmd
             ]
         at = self._at_prefix(text)

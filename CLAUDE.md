@@ -15,7 +15,7 @@ uv run python app.py
 uv run ruff check .
 uv run ruff format .
 
-# Run tests
+# Run tests (tests/test_tui_smoke.py drives the real ChatApp headless via run_test() + Pilot)
 uv run pytest tests/
 
 # Start SearXNG + Valkey (default)
@@ -49,11 +49,13 @@ mixins/             → ChatApp behaviour split into focused mixins (all inherit
   agents.py         → AgentsMixin: /create-agent, /load-agent, /list-agents, /reload-agent, /delete-agent
   app_tools.py      → AppToolsMixin: 22 AI-callable app tools (load/create/delete agent, model switch, TTS, MCP…)
   bash.py           → BashMixin: ! command execution
+  commands.py       → CommandsMixin: every slash-command handler (`@slash`) + `run_slash` dispatch
   mcp.py            → MCPMixin: /mcp-list, /mcp-reload, /mcp-add, /mcp-del
   session.py        → SessionMixin: /cd, /compact, /cls, /resume, /model, /rename, /nickname, /reload-config, /init-config
   streaming.py      → StreamingMixin: _send worker, on_token, on_done, TTS playback (run_in_executor thread)
 widgets/
-  input.py          → HistoryInput, ChatAutoComplete
+  input.py          → HistoryInput, ChatAutoComplete, PromptSpinner (border_title spinner)
+  slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
   tree.py           → RightClickTree, TreeContextMenu, FileTree
   sidebar.py        → ResizeHandle, Sidebar
   chat.py           → ImageBubble, FileViewer, CopyButton, CapabilityBadge, CapLabel, AIMessage
@@ -134,6 +136,10 @@ widgets/
 | `/reload-config` | Re-read `.kai/config.json` and apply all settings to the running process |
 | `/init-config` | Open interactive ConfigScreen: select keys, L→`cwd/.kai/config.json`, G→`~/.kai/config.json` |
 | `/tts <engine\|off>` | Switch TTS engine or disable: `edge-tts`, `melotts`, `kokoro-api`, `kokoro`, `azure-tts`, `off` (in-memory only; does not persist to config.json) |
+
+Adding a slash command: write `async def _cmd_xxx(self, arg: str) -> None` in `mixins/commands.py` with `@slash("/xxx", "說明", needs_arg=..., presets=...)`. Prompt submit, autocomplete and the Ctrl+P palette all read the same table; `needs_arg=True` makes the palette fill the prompt instead of running. Don't add `if cmd == ...` branches to `on_input_submitted`.
+
+Prompt spinner: use `PromptSpinner(prompt, label, suffix=..., visible=...).start()` and `stop()` in `finally`; change `spinner.label` to update the phase text. Don't hand-roll `set_interval` tick closures.
 
 ### `!` bash commands
 

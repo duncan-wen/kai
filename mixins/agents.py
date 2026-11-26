@@ -8,8 +8,7 @@ from textual.widgets import TabbedContent, TabPane
 
 from core.agent import Agent
 from core.agent_factory import read_definition
-from mixins.streaming import SPINNER
-from widgets.input import HistoryInput
+from widgets.input import HistoryInput, PromptSpinner
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,17 +35,7 @@ class AgentsMixin(_MixinBase):
         prompt = self.query_one("#prompt", HistoryInput)
         prompt.disabled = True
         design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
-        prompt.border_title = f"{SPINNER[0]} 設計 agent 中（{design_model}）…"
-        _spin_idx = 0
-
-        def _tick() -> None:
-            nonlocal _spin_idx
-            _spin_idx = (_spin_idx + 1) % len(SPINNER)
-            prompt.border_title = (
-                f"{SPINNER[_spin_idx]} 設計 agent 中（{design_model}）…"
-            )
-
-        timer = self.set_interval(0.08, _tick)
+        spinner = PromptSpinner(prompt, f"設計 agent 中（{design_model}）…").start()
         await msgs.mount(
             Static(f"🏭 設計中：{description}", markup=False, classes="bash-output")
         )
@@ -75,7 +64,7 @@ class AgentsMixin(_MixinBase):
         except Exception as e:
             self.notify(f"建立失敗：{e}", severity="error")
         finally:
-            timer.stop()
+            spinner.stop()
             prompt.disabled = False
             self._update_prompt_title()
             prompt.placeholder = f"傳訊息給 {self.agent.display_name}..."
@@ -141,7 +130,6 @@ class AgentsMixin(_MixinBase):
         from widgets.input import HistoryInput
         from textual.widgets import Static as _Static, Collapsible
         from loguru import logger
-        from mixins.streaming import SPINNER
 
         # target 通常是 send_to_agent 給的 tab id；其他來源則依名稱查找
         from core.agent_registry import AgentRegistry
@@ -178,23 +166,15 @@ class AgentsMixin(_MixinBase):
         except Exception:
             pass
 
-        # spinner
-        _spin_idx = 0
-        _spin_label = "等待回覆"
-
-        def _tick() -> None:
-            nonlocal _spin_idx
-            _spin_idx = (_spin_idx + 1) % len(SPINNER)
-            try:
-                from textual.widgets import TabbedContent as _TC2
-
-                if self.query_one("#center-tabs", _TC2).active == target_tab_id:
-                    dbg = "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else ""
-                    prompt.border_title = f"{SPINNER[_spin_idx]} {_spin_label}{dbg}"
-            except Exception:
-                pass
-
-        timer = self.set_interval(0.08, _tick)
+        # spinner：只在目標 agent 的 tab 是目前 tab 時才畫
+        spinner = PromptSpinner(
+            prompt,
+            "等待回覆",
+            suffix=lambda: "  [dim]🔧 debug[/dim]" if self.ui_state.debug_tools else "",
+            visible=lambda: (
+                self.query_one("#center-tabs", TabbedContent).active == target_tab_id
+            ),
+        ).start()
 
         preview = content[:300] + ("…" if len(content) > 300 else "")
         await scroll.mount(
@@ -209,8 +189,8 @@ class AgentsMixin(_MixinBase):
         buf: list[str] = []
 
         async def on_token(chunk: str) -> None:
-            nonlocal _spin_label, stream_msg
-            _spin_label = "生成中"
+            nonlocal stream_msg
+            spinner.label = "生成中"
             buf.append(chunk)
             if stream_msg is None:
                 await scroll.mount(
@@ -235,8 +215,8 @@ class AgentsMixin(_MixinBase):
             await stream_msg.update_content(display, final=True)
 
         async def on_tool_call(name: str, args: dict, tr: "ToolResult") -> None:
-            nonlocal _spin_label, stream_msg, buf
-            _spin_label = "工具回應中"
+            nonlocal stream_msg, buf
+            spinner.label = "工具回應中"
             if stream_msg and buf:
                 _pre = _re.sub(
                     r"\s*<next>.*?</next>\s*$", "", "".join(buf), flags=_re.DOTALL
@@ -303,7 +283,7 @@ class AgentsMixin(_MixinBase):
                 f"{agent.display_name} 處理 {sender} 的訊息失敗：{e}", severity="error"
             )
         finally:
-            timer.stop()
+            spinner.stop()
             self.tab_state.streaming_tabs.discard(target_tab_id)
             try:
                 from textual.widgets import TabbedContent as _TC3
@@ -326,15 +306,7 @@ class AgentsMixin(_MixinBase):
 
         prompt = self.query_one("#prompt", HistoryInput)
         prompt.disabled = True
-        prompt.border_title = f"{SPINNER[0]} {agent.display_name} 開場中…"
-        _spin_idx = 0
-
-        def _tick() -> None:
-            nonlocal _spin_idx
-            _spin_idx = (_spin_idx + 1) % len(SPINNER)
-            prompt.border_title = f"{SPINNER[_spin_idx]} {agent.display_name} 開場中…"
-
-        timer = self.set_interval(0.08, _tick)
+        spinner = PromptSpinner(prompt, f"{agent.display_name} 開場中…").start()
         stream_msg: AIMessage | None = None
         buf: list[str] = []
 
@@ -378,7 +350,7 @@ class AgentsMixin(_MixinBase):
         except Exception as e:
             self.notify(f"greeting 失敗：{e}", severity="warning")
         finally:
-            timer.stop()
+            spinner.stop()
             prompt.disabled = False
             if self.agent is agent:
                 self._update_prompt_title()
