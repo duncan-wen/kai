@@ -710,3 +710,127 @@ def test_dispatch_error_on_visible_tab_is_not_toasted_twice(app_factory) -> None
         assert not any("處理 小助理 的訊息失敗" in n for n in _notifications(app))
 
     _run(app_factory, body)
+
+
+# ── tab 關閉／開啟的時序（fix/tab-close）──────────────────────────────────────
+
+
+async def _open_agent_tab(app, pilot: Pilot, tmp_path: Path, nickname: str) -> str:
+    from core.agent import Agent
+    from widgets.center_tabs import CenterTabs
+
+    agent = Agent(model=app.agent.profile.name, history_file=tmp_path / "h.json")
+    agent.nickname = nickname
+    tid = app.agents.add(agent)
+    await app.query_one(CenterTabs).add_agent_tab(tid, nickname)
+    app._switch_to_tab(tid)
+    await pilot.pause()
+    return tid
+
+
+def test_closing_active_agent_tab_next_to_file_tab_shows_main(
+    app_factory, tmp_path: Path
+) -> None:
+    """關掉作用中的 agent tab、畫面落在檔案 tab：側邊欄要退回 main，不停在已關掉的 agent。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        f = tmp_path / "a.txt"
+        f.write_text("aa", encoding="utf-8")
+        fid = await _open(app, pilot, f)
+        tid = await _open_agent_tab(app, pilot, tmp_path, "分身")
+        assert app.agent_view.display_name == "分身"
+
+        await app._maybe_close_tab(tid)
+        await pilot.pause()
+        assert app.agents.get(tid) is None
+        assert app.agent is app.agents.main
+        assert app.agent_view.display_name == app.agents.main.display_name
+        assert fid in app.query_one("CenterTabs").tab_order()
+
+    _run(app_factory, body)
+
+
+def test_registry_is_cleared_before_pane_is_removed(
+    app_factory, tmp_path: Path
+) -> None:
+    """pane 移除時 agent 已不在 registry：dispatch 不會把回覆畫進 main chat。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        tid = await _open_agent_tab(app, pilot, tmp_path, "分身")
+        seen: list[bool] = []
+        real_remove = tabs.remove_pane
+
+        def spy(pane_id: str):
+            seen.append(app.agents.get(pane_id) is None)
+            return real_remove(pane_id)
+
+        tabs.remove_pane = spy
+        await app._maybe_close_tab(tid)
+        await pilot.pause()
+        assert seen == [True]
+
+    _run(app_factory, body)
+
+
+def test_closing_tab_cancels_its_turns(app_factory, tmp_path: Path) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from core.model_stream import CancelToken
+
+        tid = await _open_agent_tab(app, pilot, tmp_path, "分身")
+        cancel = CancelToken()
+        app.mark_busy(tid, cancel)
+        try:
+            await app._maybe_close_tab(tid)
+            await pilot.pause()
+            assert cancel.cancelled
+        finally:
+            app.unmark_busy(tid, cancel)
+
+    _run(app_factory, body)
+
+
+def test_double_close_removes_once(app_factory, tmp_path: Path) -> None:
+    """連點兩下 ×：第二次在第一次還沒關完時直接略過。"""
+
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        f = tmp_path / "a.txt"
+        f.write_text("aa", encoding="utf-8")
+        fid = await _open(app, pilot, f)
+        calls: list[str] = []
+        real_remove = tabs.remove_pane
+
+        def spy(pane_id: str):
+            calls.append(pane_id)
+            return real_remove(pane_id)
+
+        tabs.remove_pane = spy
+        await asyncio.gather(tabs.request_close(fid), tabs.request_close(fid))
+        await pilot.pause()
+        assert calls == [fid]
+        assert fid not in tabs.tab_order()
+
+    _run(app_factory, body)
+
+
+def test_opening_same_file_twice_concurrently_gives_one_tab(
+    app_factory, tmp_path: Path
+) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        from widgets.center_tabs import CenterTabs
+
+        tabs = app.query_one(CenterTabs)
+        f = tmp_path / "a.txt"
+        f.write_text("aa", encoding="utf-8")
+        w1, w2 = tabs.open_file(f), tabs.open_file(f)
+        await w1.wait()
+        await w2.wait()
+        await pilot.pause()
+        assert tabs.tab_order() == ["chat", tabs.active]
+
+    _run(app_factory, body)

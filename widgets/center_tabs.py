@@ -1,14 +1,17 @@
 """CenterTabs：中間的 TabbedContent（Chat tab、agent tab、檔案 tab）。
 
 擁有檔案 tab 的建立／去重、tab 關閉（含未存檔確認、點 “×” 關閉）、左右移動，
-以及依 tab id 找訊息容器。對外送 `TabClosed` / `ActiveChanged`；agent tab 的 id
-由 core.agent_registry 配發，關閉後要不要清 registry 由 App 決定。
+以及依 tab id 找訊息容器。對外送 `ActiveChanged`；agent tab 的 id 由
+core.agent_registry 配發。關 tab 前同步呼叫 `before_close(tab_id)`（App 在這裡清
+registry），讓「pane 已移除、agent 還在 registry」的空窗不存在。
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from textual import events, on, work
@@ -27,13 +30,6 @@ class CenterTabs(TabbedContent):
 
     CHAT_ID = "chat"
 
-    class TabClosed(Message):
-        """某個 tab 已從畫面上移除。"""
-
-        def __init__(self, tab_id: str) -> None:
-            super().__init__()
-            self.tab_id = tab_id
-
     class ActiveChanged(Message):
         """畫面上作用中的 tab 換了（已讀 `active`，過時的 TabActivated 不會誤報）。"""
 
@@ -41,10 +37,20 @@ class CenterTabs(TabbedContent):
             super().__init__()
             self.tab_id = tab_id
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        before_close: Callable[[str], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        self._before_close = before_close or (lambda _tab_id: None)
         self._file_tabs: dict[str, Path] = {}
         self._file_tab_counter = 0
+        self._opening_paths: set[Path] = (
+            set()
+        )  # 讀檔中的路徑：同一檔案連開兩次只開一個 tab
+        self._closing_tabs: set[str] = set()  # 關閉中的 tab：連點兩下 × 只關一次
 
     # ── 作用中 tab ────────────────────────────────────────────────────────────
 
@@ -56,13 +62,8 @@ class CenterTabs(TabbedContent):
             self.post_message(self.ActiveChanged(self.active))
 
     def messages_for(self, tab_id: str) -> ChatLog:
-        """回傳 tab 的訊息容器；找不到（例如檔案 tab）時退回 Chat tab 的。"""
-        if tab_id != self.CHAT_ID:
-            try:
-                return self.get_pane(tab_id).query_one(ChatLog)
-            except Exception:
-                pass
-        return self.get_pane(self.CHAT_ID).query_one(ChatLog)
+        """回傳 Chat / agent tab 的訊息容器；tab 不存在或不是對話 tab 時 raise。"""
+        return self.get_pane(tab_id).query_one(ChatLog)
 
     # ── 開啟 ──────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,15 @@ class CenterTabs(TabbedContent):
             if p == path:
                 self.active = tid
                 return
+        if path in self._opening_paths:
+            return
+        self._opening_paths.add(path)
+        try:
+            await self._open_new_file(path)
+        finally:
+            self._opening_paths.discard(path)
+
+    async def _open_new_file(self, path: Path) -> None:
         self._file_tab_counter += 1
         tab_id = f"ft-{self._file_tab_counter}"
         try:
@@ -103,8 +113,9 @@ class CenterTabs(TabbedContent):
 
     async def request_close(self, tab_id: str) -> None:
         """關閉 tab；檔案有未存檔修改時先以 modal 確認。Chat tab 不關。"""
-        if not tab_id or tab_id == self.CHAT_ID:
+        if not tab_id or tab_id == self.CHAT_ID or tab_id in self._closing_tabs:
             return
+        self._closing_tabs.add(tab_id)
         try:
             viewer = self.get_pane(tab_id).query_one(FileViewer)
         except Exception:
@@ -115,15 +126,20 @@ class CenterTabs(TabbedContent):
             async def _on_confirm(confirmed: bool | None) -> None:
                 if confirmed:
                     await self._close(tab_id)
+                else:
+                    self._closing_tabs.discard(tab_id)
 
             self.app.push_screen(ConfirmCloseScreen(fname), callback=_on_confirm)
             return
         await self._close(tab_id)
 
     async def _close(self, tab_id: str) -> None:
-        self._file_tabs.pop(tab_id, None)
-        await self.remove_pane(tab_id)
-        self.post_message(self.TabClosed(tab_id))
+        try:
+            self._before_close(tab_id)
+            self._file_tabs.pop(tab_id, None)
+            await self.remove_pane(tab_id)
+        finally:
+            self._closing_tabs.discard(tab_id)
 
     def on_click(self, event: events.Click) -> None:
         """點 tab 標籤最右側的 “×” 關閉該 tab。"""
