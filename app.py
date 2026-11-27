@@ -18,7 +18,7 @@ from textual.app import App, ComposeResult
 from textual.message import Message
 from textual.reactive import reactive
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal
 from textual.widgets import (
     Footer,
     Header,
@@ -31,7 +31,7 @@ from core.agent_registry import AgentRegistry
 from core.app_state import AgentView, InputState, SessionState, TabState, UIState
 from core.model_stream import CancelToken
 import core.config as _kai_cfg
-from core.config import USERNAME, apply_kai_config, ensure_kai_dir, load_kai_config
+from core.config import apply_kai_config, ensure_kai_dir, load_kai_config
 from core.mcp_client import MCPClient, load_mcp_servers
 from core.skills import discover_skills
 from mixins.agents import AgentsMixin
@@ -43,10 +43,10 @@ from mixins.skills import SkillsMixin
 from mixins.session import SessionMixin
 from mixins.streaming import StreamingMixin
 from widgets.chat import (
-    AIMessage,
     CapBar,
 )
 from widgets.center_tabs import CenterTabs
+from widgets.chat_log import ChatLog
 from widgets.commands import ChatCommands
 from widgets.input import HistoryInput
 from widgets.prompt_bar import PromptBar
@@ -172,7 +172,7 @@ class ChatApp(
             yield ResizeHandle("file-tree", id="file-tree-handle")
             with CenterTabs(initial="chat", id="center-tabs"):
                 with TabPane("💬 Chat", id="chat"):
-                    with VerticalScroll(id="messages"):
+                    with ChatLog(id="messages"):
                         yield Static(
                             "[dim]輸入訊息開始對話[/dim]  ·  "
                             "[dim]Ctrl+P[/dim] 命令  "
@@ -223,65 +223,8 @@ class ChatApp(
 
     @work
     async def _render_history(self) -> None:
-        """把 agent.history 渲染到 chat 視窗（啟動 / /cd 後呼叫）。"""
-        msgs = self.query_one("#messages", VerticalScroll)
-        await self._render_history_into(msgs, self.agent)
-
-    async def _render_history_into(self, msgs: VerticalScroll, agent: "Agent") -> None:
-        """核心渲染邏輯，可指定目標 scroll 與 agent（供 agent tab 直接呼叫）。"""
-        widgets: list = []
-        ai_updates: list[tuple[AIMessage, str]] = []
-        nickname = agent.display_name
-
-        for msg in agent.history:
-            role = msg.get("role")
-            content = msg.get("content") or ""
-            if role == "system":
-                continue
-            if role == "user":
-                if isinstance(content, list):
-                    text = next(
-                        (p.get("text", "") for p in content if p.get("type") == "text"),
-                        "",
-                    )
-                else:
-                    text = content
-                inbox_sender = msg.get("_inbox_sender")
-                if inbox_sender and text:
-                    from textual.widgets import Collapsible
-
-                    preview = text[:300] + ("…" if len(text) > 300 else "")
-                    widgets.append(
-                        Collapsible(
-                            Static(preview, markup=False),
-                            title=f"📨 來自 {inbox_sender}",
-                            collapsed=True,
-                            classes="inbox-bubble",
-                        )
-                    )
-                elif text:
-                    widgets.append(
-                        Static(
-                            f"[bold]{USERNAME}[/bold]\n{text}",
-                            markup=True,
-                            classes="user-bubble",
-                        )
-                    )
-            elif role == "assistant" and content:
-                widgets.append(
-                    Static(f"🤖 {nickname}", classes="ai-header", markup=False)
-                )
-                ai_msg = AIMessage()
-                widgets.append(ai_msg)
-                ai_updates.append((ai_msg, content))
-
-        if widgets:
-            await msgs.mount(*widgets)  # 一次 layout pass，而非 N 次
-
-        for ai_msg, content in ai_updates:
-            await ai_msg.update_content(content, final=True)
-
-        msgs.scroll_end(animate=False)
+        """啟動時把 agent.history 畫在歡迎訊息後面。"""
+        await self._active_msgs().render_history(self.agent, clear=False)
 
     async def _mcp_lifecycle(self) -> None:
         """Single long-lived asyncio task: MCP start → keep-alive → stop.
@@ -367,13 +310,7 @@ class ChatApp(
             await self.run_slash(text)
             return
 
-        msgs = self._active_msgs()
-        await msgs.mount(
-            Static(
-                f"[bold]{USERNAME}[/bold]\n{text}", markup=True, classes="user-bubble"
-            )
-        )
-        msgs.scroll_end(animate=False)
+        await self._active_msgs().add_user(text)
 
         at_files = self._parse_at_files(text)
         if at_files:
@@ -660,7 +597,7 @@ class ChatApp(
         sidebar.display = not sidebar.display
         self.query_one("#sidebar-handle", ResizeHandle).display = sidebar.display
 
-    def _active_msgs(self) -> VerticalScroll:
+    def _active_msgs(self) -> ChatLog:
         """回傳作用中 Agent 對應的訊息容器。"""
         return self.query_one(CenterTabs).messages_for(self.agents.active_id)
 

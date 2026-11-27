@@ -396,9 +396,7 @@ class AppToolsMixin(_MixinBase):
             return "需要 GEMINI_API_KEY 或 DEEPSEEK_API_KEY 才能壓縮"
         try:
             summary = await self.agent.compact_history()
-            msgs = self._active_msgs()
-            await msgs.remove_children()
-            await self._render_history_into(msgs, self.agent)
+            await self._active_msgs().render_history(self.agent)
             preview = summary[:80] + "…" if len(summary) > 80 else summary
             return f"✅ 對話已壓縮。摘要：{preview}"
         except Exception as e:

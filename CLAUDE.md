@@ -54,10 +54,11 @@ mixins/             → ChatApp behaviour split into focused mixins (all inherit
   commands.py       → CommandsMixin: every slash-command handler (`@slash`) + `run_slash` dispatch
   mcp.py            → MCPMixin: /mcp-list, /mcp-reload, /mcp-add, /mcp-del
   session.py        → SessionMixin: /cd, /compact, /cls, /resume, /model, /rename, /nickname, /reload-config, /init-config
-  streaming.py      → StreamingMixin: _send worker, on_token, on_done, TTS playback (run_in_executor thread)
+  streaming.py      → StreamingMixin: _send worker, _turn_sink (shared by all turn consumers), TTS playback (run_in_executor thread)
 widgets/
   input.py          → HistoryInput, ChatAutoComplete, PromptSpinner (border_title spinner)
-  center_tabs.py    → CenterTabs(TabbedContent): file tabs, close (unsaved confirm, “×” click), move, messages_for(tab_id); posts TabClosed / ActiveChanged
+  center_tabs.py    → CenterTabs(TabbedContent): file tabs, close (unsaved confirm, “×” click), move, messages_for(tab_id) → ChatLog; posts TabClosed / ActiveChanged
+  chat_log.py       → ChatLog(VerticalScroll): one tab's message stream (add_user / add_inbox / add_notice / add_error / add_output / render_history); start_reply → ReplySink renders turn events; format_stats, error_text
   prompt_bar.py     → PromptBar: input row (📎 + HistoryInput + autocomplete); owns prompt history, posts PromptBar.Submitted
   slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
   tree.py           → RightClickTree, TreeContextMenu, FileTree
@@ -94,13 +95,14 @@ widgets/
 |--------|------|---------|
 | `ChatApp` | app.py | root App, composes all mixins, event handlers |
 | `PromptBar` | widgets/prompt_bar.py | input row: 📎 attach button + `HistoryInput`; owns Up/Down history (`.kai/.prompt_history`), marker expansion, mouse-debris filter; mounts `ChatAutoComplete` on the screen; posts `PromptBar.Submitted(text)` — `ChatApp.on_prompt_bar_submitted` only dispatches (`!` / `/` / chat) |
-| `CenterTabs` | widgets/center_tabs.py | `TabbedContent` subclass: opens / dedups file tabs (`open_file`), adds agent tabs (`add_agent_tab`, id from `AgentRegistry`), closes tabs (`request_close`: `ConfirmCloseScreen` for unsaved files, “×” click), moves tabs (`move_active`), finds a tab's message container (`messages_for`); posts `ActiveChanged(tab_id)` (App sets `active_tab` + active agent) and `TabClosed(tab_id)` (App drops agent tabs from the registry) |
+| `CenterTabs` | widgets/center_tabs.py | `TabbedContent` subclass: opens / dedups file tabs (`open_file`), adds agent tabs (`add_agent_tab`, id from `AgentRegistry`), closes tabs (`request_close`: `ConfirmCloseScreen` for unsaved files, “×” click), moves tabs (`move_active`), finds a tab's `ChatLog` (`messages_for`); posts `ActiveChanged(tab_id)` (App sets `active_tab` + active agent) and `TabClosed(tab_id)` (App drops agent tabs from the registry) |
 | `HistoryInput` | widgets/input.py | single-line input: long-text / multiline paste → marker, Ctrl+Z undo, ghost-text prediction; Up/Down post `HistoryInput.Navigate` to `PromptBar` |
 | `ChatAutoComplete` | widgets/input.py | slash command / path autocomplete |
 | `FileTree` | widgets/tree.py | lazy-loading dir tree; double-click opens file tab; Ctrl+click / Space multi-select for batch delete; 2s deep fs watcher |
 | `RightClickTree` | widgets/tree.py | Tree subclass; intercepts right-click + Ctrl+click; Space/Ctrl+A/Escape key bindings |
 | `TreeContextMenu` | widgets/tree.py | ModalScreen right-click menu; shows "刪除選取 (N 項)" when multi-selected |
 | `FileViewer` | widgets/chat.py | TextArea with syntax highlighting + WSL-aware Ctrl+C multi-line copy; mtime polling for external change detection; Ctrl+S save, F2 save-as |
+| `ChatLog` | widgets/chat_log.py | one tab's message stream (`#messages` for Chat, `msgs-{tab_id}` for agent tabs). Everything shown in a chat goes through its `add_*` / `render_history` methods; a turn draws through `start_reply(agent, debug=, on_phase=)` → `ReplySink` (thinking, 0.1s-throttled bubble, tool cards, notices, stats). Owns the "auto-scroll only when already at the bottom" rule. Don't `mount` into it from mixins |
 | `AIMessage` | widgets/chat.py | AI response widget; Static stream-view during streaming, Markdown md-view on final |
 | `Sidebar` | widgets/sidebar.py | cwd / model / git status / MCP tools |
 | `ResizeHandle` | widgets/sidebar.py | drag-to-resize handle between file tree and center |
@@ -271,7 +273,7 @@ When pasting multiline text into the prompt:
 
 Backend differences live behind the `ModelStream` seam (`core/model_stream.py`); the turn uses a neutral message format and adapters in `core/backends.py` convert it to wire format. Tests swap in `tests/fake_model.py::FakeModel` via `agent.model_stream = FakeModel([...])`.
 
-UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with their own sink. Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `await agent.commit(done.new_messages)`. Call `mark_busy` immediately before the `try` whose `finally` unmarks it.
+UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with the same sink, `StreamingMixin._turn_sink(log, agent, spinner)`: `ChatLog.start_reply` draws it, the wrapper refreshes file tree / git. Consumers only add what is theirs (TTS and prediction in `_send`, inbox bubble and error toast in dispatch). Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `await agent.commit(done.new_messages)`. Call `mark_busy` immediately before the `try` whose `finally` unmarks it.
 
 ### History
 

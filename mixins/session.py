@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 
-from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from core.agent import Agent
@@ -109,8 +108,7 @@ class SessionMixin(_MixinBase):
         self.query_one("#file-tree", FileTree).refresh_tree()
         self.agent.reset_history()
         self._refresh_skills_sidebar()
-        await self.query_one("#messages", VerticalScroll).remove_children()
-        self._render_history()
+        await self._active_msgs().render_history(self.agent)
         self.refresh_agent_view()
         self.notify(f"已切換至 {target}", severity="information")
 
@@ -122,14 +120,10 @@ class SessionMixin(_MixinBase):
             )
             return
         msgs = self._active_msgs()
-        await msgs.mount(
-            Static("⚡ 正在用 Gemini 壓縮對話歷史…", classes="error-msg", markup=False)
-        )
-        msgs.scroll_end(animate=False)
+        await msgs.add_notice("⚡ 正在壓縮對話歷史…")
         try:
             await self.agent.compact_history()
-            await msgs.remove_children()
-            await self._render_history_into(msgs, self.agent)
+            await msgs.render_history(self.agent)
             self.notify("✅ 對話已壓縮", severity="information")
         except Exception as e:
             self.notify(f"compact 失敗：{e}", severity="error")
@@ -229,9 +223,8 @@ class SessionMixin(_MixinBase):
         if result.kind == "archived" and result.archive is not None:
             self.notify(f"已自動封存：{result.archive.name}", timeout=3)
         msgs = self._active_msgs()
-        await msgs.remove_children()
         agent.reset_history()
-        await self._render_history_into(msgs, agent)
+        await msgs.render_history(agent)
         self.refresh_agent_view()
         name_display = store.name or archive.name
         self.notify(f"已載入：{name_display}（有新對話後才會重新封存）", timeout=4)

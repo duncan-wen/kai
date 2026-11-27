@@ -9,7 +9,6 @@ from pathlib import Path
 
 from rich.text import Text
 from textual import work
-from textual.widgets import Static
 
 from core.config import BASH_TIMEOUT
 from widgets.input import HistoryInput, PromptSpinner
@@ -42,10 +41,7 @@ class BashMixin(_MixinBase):
 
         msgs = self._active_msgs()
         prompt = self.query_one("#prompt", HistoryInput)
-        await msgs.mount(
-            Static(f"[bold]$[/bold] {cmd}", markup=True, classes="user-bubble")
-        )
-        msgs.scroll_end(animate=False)
+        await msgs.add_command(cmd)
         my_tab = self.active_tab
         self.mark_busy(my_tab)
         spinner = PromptSpinner(
@@ -69,8 +65,7 @@ class BashMixin(_MixinBase):
                 start_new_session=True,
             )
             self._bash_proc = proc
-            out_widget = Static(Text(""), markup=False, classes="bash-output")
-            await msgs.mount(out_widget)
+            out_widget = await msgs.add_output(Text(""))
             lines: list[str] = []
 
             def _refresh() -> None:
@@ -104,9 +99,7 @@ class BashMixin(_MixinBase):
                 lines.append(f"\n⏱ 逾時（>{BASH_TIMEOUT}s）")
                 _refresh()
         except Exception as e:
-            await msgs.mount(
-                Static(f"❌ {e or type(e).__name__}", markup=False, classes="error-msg")
-            )
+            await msgs.add_error(f"❌ {e or type(e).__name__}")
         finally:
             msgs.scroll_end(animate=False)
             spinner.stop()

@@ -233,6 +233,8 @@ widgets/
                 TreeContextMenu（右鍵選單 ModalScreen）
   sidebar.py    Sidebar（cwd、模型、git、MCP 工具）
                 ResizeHandle（拖拉分隔條）
+  chat_log.py   ChatLog（一個 tab 的訊息流，所有訊息都從這裡 mount）
+                ReplySink（start_reply 回傳，把 turn 事件畫成泡泡／卡片／stats）
   chat.py       AIMessage（Markdown 渲染）
                 FileViewer（TextArea，Ctrl+C WSL 多行複製）
                 ImageBubble（圖片訊息卡片）

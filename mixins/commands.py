@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from textual_fspicker import FileOpen, Filters, SelectDirectory
 
 from core.models import REGISTRY
-from widgets.chat import ImageBubble
 from widgets.input import HistoryInput
 from widgets.slash import get_command, slash, split_command
 from widgets.tree import FileTree
@@ -122,9 +121,7 @@ class CommandsMixin(_MixinBase):
         if not p.exists():
             self.notify(f"找不到圖片：{img_path}", severity="error")
             return
-        msgs = self._active_msgs()
-        await msgs.mount(ImageBubble(str(p), question))
-        msgs.scroll_end(animate=False)
+        await self._active_msgs().add_image(str(p), question)
         self._send(question, images=[str(p)])
 
     def _pick_image(self) -> None:

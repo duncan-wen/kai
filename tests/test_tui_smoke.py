@@ -672,3 +672,25 @@ def test_turn_error_shows_message_and_unlocks(app_factory) -> None:
         assert not app.prompt_locked
 
     _run(app_factory, body)
+
+
+def test_dispatch_renders_inbox_reply_and_stats(app_factory) -> None:
+    """其他 agent 送來的訊息：inbox 泡泡、回覆、stats 都和 _send 用同一套畫法。"""
+    from textual.widgets import Collapsible
+
+    from tests.fake_model import FakeModel, reply
+    from widgets.chat import AIMessage
+
+    async def body(app, pilot: Pilot) -> None:
+        app.agent.model_stream = FakeModel([reply("收到", gen_tokens=2)])
+        app._dispatch_to_agent("小助理", "chat", "幫我查一下")
+        await _wait_turn(app, pilot)
+
+        msgs = app._active_msgs()
+        assert [c.title for c in msgs.query(Collapsible)] == ["📨 來自 小助理"]
+        assert [m._raw for m in msgs.query(AIMessage)] == ["收到"]
+        assert "2 tokens" in str(msgs.query_one(".stats").render())
+        assert app.agent.history[-1] == {"role": "assistant", "content": "收到"}
+        assert not app.prompt_locked
+
+    _run(app_factory, body)
