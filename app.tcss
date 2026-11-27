@@ -25,7 +25,7 @@
     border: none;
 }
 
-#messages {
+ChatLog {
     width: 1fr;
     padding: 0 2 1 2;
     scrollbar-gutter: stable;
@@ -137,6 +137,13 @@ ResizeHandle.dragging {
 .error-msg {
     border-left: thick $error;
     color: $error;
+    padding: 0 1;
+    margin: 1 0;
+}
+
+.notice {
+    border-left: thick $warning;
+    color: $text-muted;
     padding: 0 1;
     margin: 1 0;
 }

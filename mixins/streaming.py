@@ -3,76 +3,54 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 from loguru import logger
 from textual import work
-from textual.widgets import Collapsible, Markdown, Static
 
-
-from widgets.chat import AIMessage
+from core.model_stream import CancelToken
+from core.turn import Done, ToolEvent, TurnEvent, TurnRequest, run_turn
+from widgets.chat_log import ChatLog
 from widgets.input import HistoryInput, PromptSpinner
 from widgets.sidebar import Sidebar
 from widgets.tree import FileTree
 
-from typing import TYPE_CHECKING
-
-from core.model_stream import CancelToken
-from core.turn import (
-    Compacted,
-    Compacting,
-    Done,
-    StepReset,
-    ThinkingDone,
-    Token,
-    ToolEvent,
-    TurnEvent,
-    TurnRequest,
-    TurnStats,
-    run_turn,
-)
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 if TYPE_CHECKING:
     from app import ChatApp as _MixinBase
+    from core.agent import Agent
 else:
     _MixinBase = object  # type: ignore[assignment,misc]
 
 
-def format_stats(stats: TurnStats) -> str:
-    """turn 結束後的統計行：思考秒數、耗時、tokens、context 使用率、cache 命中。"""
-    parts: list[str] = []
-    if stats.thinking_s:
-        parts.append(f"思考 {stats.thinking_s:.1f}s")
-    parts.append(f"共 {stats.elapsed:.1f}s")
-    u = stats.usage
-    if u.gen_tokens:
-        parts.append(f"{u.gen_tokens} tokens")
-    prompt_tok = u.prompt_tokens
-    if prompt_tok:
-        if u.num_ctx:
-            pct = prompt_tok * 100 // u.num_ctx
-            parts.append(f"ctx {pct}% ({prompt_tok}/{u.num_ctx})")
-        else:
-            parts.append(f"輸入 {prompt_tok} tokens")
-        if u.cache_hit is not None:
-            parts.append(f"cache {u.cache_hit * 100 // prompt_tok}%")
-    return " · ".join(parts)
-
-
-_ERROR_PREFIX = {
-    "timeout": "⏱ 模型無回應（逾時）：",
-    "overflow": "❌ Context 已滿：",
-    "quota": "❌ ",
-    "other": "❌ 錯誤：",
-}
-
-
-def error_text(done: Done) -> str:
-    assert done.error is not None
-    return _ERROR_PREFIX[done.error.kind] + done.error.message
+_FS_MUTATING = frozenset(
+    {"write_file", "create_directory", "move_file", "delete_file", "edit_file"}
+)
 
 
 class StreamingMixin(_MixinBase):
+    def _turn_sink(
+        self, log: ChatLog, agent: "Agent", spinner: PromptSpinner
+    ) -> Callable[[TurnEvent], Awaitable[None]]:
+        """三個 turn 消費者共用的 sink：畫到 ChatLog，並同步檔案樹 / git。"""
+        reply = log.start_reply(
+            agent,
+            debug=self.debug_tools,
+            on_phase=lambda label: setattr(spinner, "label", label),
+        )
+
+        async def sink(ev: TurnEvent) -> None:
+            await reply(ev)
+            if isinstance(ev, ToolEvent):
+                tr = ev.result
+                if ev.name in _FS_MUTATING and not tr.is_error and not tr.is_warn:
+                    self.query_one("#file-tree", FileTree).refresh_tree()
+            elif isinstance(ev, Done):
+                self.query_one("#sidebar", Sidebar).refresh_git()
+                self.query_one("#file-tree", FileTree).refresh_tree()
+
+        return sink
+
     @work(exclusive=True)
     async def _send(
         self,
@@ -81,13 +59,11 @@ class StreamingMixin(_MixinBase):
         ephemeral: bool = False,
         original_text: str | None = None,
     ) -> None:
-        # 快照 agent 與 msgs：worker 執行期間 self.agent 可能因 tab 切換被替換，
+        # 快照 agent 與 log：worker 執行期間 self.agent 可能因 tab 切換被替換，
         # 固定使用送出當下的 agent，避免回覆跑到錯誤的 tab。
         agent = self.agent
-        msgs = self._active_msgs()
+        log = self._active_msgs()
         prompt = self.query_one("#prompt", HistoryInput)
-        stream_msg: AIMessage | None = None
-        cur_text = ""  # 本 step 目前可見的文字（已剝 <next>）
         done: Done | None = None
 
         self.input_state.last_send_text = original_text or text
@@ -101,165 +77,7 @@ class StreamingMixin(_MixinBase):
         spinner = PromptSpinner(
             prompt, "等待回覆", visible=lambda: self.active_tab == _my_tab_id
         )
-
-        def _at_bottom() -> bool:
-            return msgs.scroll_y >= msgs.max_scroll_y - 3
-
-        async def notice(text: str) -> None:
-            await msgs.mount(Static(text, classes="error-msg", markup=False))
-            msgs.scroll_end(animate=False)
-
-        async def finalize(content: str) -> None:
-            """把目前串流中的泡泡定稿成 Markdown。"""
-            nonlocal stream_msg, cur_text
-            if stream_msg is not None:
-                await stream_msg.update_content(content, final=True)
-            stream_msg = None
-            cur_text = ""
-
-        _last_render: float = 0.0
-
-        async def on_thinking(ev: ThinkingDone) -> None:
-            spinner.label = "思考中"
-            preview = ev.text[:2000] + ("…" if len(ev.text) > 2000 else "")
-            await msgs.mount(
-                Collapsible(
-                    Static(preview, markup=False),
-                    title="💡 思考過程",
-                    collapsed=True,
-                    classes="thinking",
-                )
-            )
-            msgs.scroll_end(animate=False)
-
-        async def on_token(ev: Token) -> None:
-            nonlocal stream_msg, _last_render, cur_text
-            spinner.label = "生成中"
-            cur_text = ev.text
-            if stream_msg is None:
-                await msgs.mount(
-                    Static(
-                        f"🤖 {agent.display_name}",
-                        classes="ai-header",
-                        markup=False,
-                    )
-                )
-                stream_msg = AIMessage()
-                await msgs.mount(stream_msg)
-            now = asyncio.get_event_loop().time()
-            if now - _last_render >= 0.1:
-                _last_render = now
-                await stream_msg.update_content(cur_text)
-                if _at_bottom():
-                    msgs.scroll_end(animate=False)
-
-        async def on_tool(ev: ToolEvent) -> None:
-            spinner.label = "工具回應中"
-            await finalize(cur_text)
-            name, args, tr = ev.name, ev.args, ev.result
-            # 錯誤判定完全來自分發層的結構化旗標，不再掃描輸出字串
-            # （避免回傳程式碼含 "Traceback" 字樣被誤塗紅）
-            result = tr.output
-            is_err = tr.is_error
-            is_warn = tr.is_warn
-            _FS_MUTATING = {
-                "write_file",
-                "create_directory",
-                "move_file",
-                "delete_file",
-                "edit_file",
-            }
-            if not is_err and not is_warn and name in _FS_MUTATING:
-                self.query_one("#file-tree", FileTree).refresh_tree()
-            icon = "❌" if is_err else ("⚠️" if is_warn else "🔧")
-            card_class = "tool-debug tool-debug-error" if is_err else "tool-debug"
-            if not self.debug_tools:
-                if is_err:
-                    args_preview = json.dumps(args, ensure_ascii=False)
-                    if len(args_preview) > 300:
-                        args_preview = args_preview[:300] + "…"
-                    body = f"參數：{args_preview}\n\n{result[:600]}"
-                    await msgs.mount(
-                        Collapsible(
-                            Static(body, markup=False),
-                            title=f"{icon} {name}  [dim]工具錯誤[/dim]",
-                            collapsed=True,
-                            classes=card_class,
-                        )
-                    )
-                    if _at_bottom():
-                        msgs.scroll_end(animate=False)
-                return
-            args_str = json.dumps(args, ensure_ascii=False, indent=2)
-            cap = 1000
-            result_preview = result[:cap] + (
-                f"\n…（共 {len(result)} 字元）" if len(result) > cap else ""
-            )
-            at_bot = _at_bottom()
-            from textual.containers import Vertical
-
-            await msgs.mount(
-                Collapsible(
-                    Vertical(
-                        Markdown(f"**參數**\n```json\n{args_str}\n```"),
-                        Static(
-                            result_preview, markup=False, classes="tool-result-body"
-                        ),
-                    ),
-                    title=f"{icon} {name}",
-                    collapsed=not is_err,
-                    classes=card_class,
-                )
-            )
-            if at_bot:
-                msgs.scroll_end(animate=False)
-
-        async def on_done(ev: Done) -> None:
-            await finalize(ev.reply if ev.reason == "complete" else cur_text)
-            if ev.reason == "empty":
-                await msgs.mount(
-                    Static(
-                        "🤖 [dim]（已完成，無文字回覆）[/dim]",
-                        markup=True,
-                        classes="ai-header",
-                    )
-                )
-            elif ev.reason == "tool_limit":
-                await notice(ev.reply)
-            elif ev.reason == "error":
-                await notice(error_text(ev))
-            if ev.reason in ("complete", "empty", "tool_limit"):
-                at_bot = _at_bottom()
-                await msgs.mount(
-                    Static(format_stats(ev.stats), classes="stats", markup=False)
-                )
-                if at_bot:
-                    msgs.scroll_end(animate=False)
-            self.query_one("#sidebar", Sidebar).refresh_git()
-            self.query_one("#file-tree", FileTree).refresh_tree()
-            if ev.reason == "complete" and not ephemeral:
-                self._speak(agent, ev.reply)
-
-        async def sink(ev: TurnEvent) -> None:
-            nonlocal done
-            if isinstance(ev, ThinkingDone):
-                await on_thinking(ev)
-            elif isinstance(ev, Token):
-                await on_token(ev)
-            elif isinstance(ev, StepReset):
-                if stream_msg is not None:
-                    await stream_msg.update_content("")
-            elif isinstance(ev, ToolEvent):
-                await on_tool(ev)
-            elif isinstance(ev, Compacting):
-                spinner.label = "壓縮中"
-                await finalize(cur_text)
-                await notice("⚡ Context 已滿，正在壓縮對話歷史…")
-            elif isinstance(ev, Compacted):
-                await notice("✅ 已壓縮，繼續對話")
-            elif isinstance(ev, Done):
-                done = ev
-                await on_done(ev)
+        sink = self._turn_sink(log, agent, spinner)
 
         # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
         self.mark_busy(_my_tab_id, cancel)
@@ -270,7 +88,7 @@ class StreamingMixin(_MixinBase):
             user_msg: dict = {"role": "user", "content": text}
             if images:
                 user_msg["images"] = images
-            await run_turn(
+            done = await run_turn(
                 agent,
                 TurnRequest(
                     user_msg,
@@ -283,7 +101,7 @@ class StreamingMixin(_MixinBase):
         except Exception as e:
             # run_turn 只有程式 bug 才 raise；接住以免 @work 關掉整個 app
             logger.exception("turn 執行例外")
-            await notice(f"❌ 錯誤：{e}")
+            await log.add_error(f"❌ 錯誤：{e}")
 
         finally:
             spinner.stop()
@@ -303,6 +121,9 @@ class StreamingMixin(_MixinBase):
                 if self.input_state.restore_input:
                     self.input_state.restore_input = False
 
+        # TTS 只唸使用者自己送出的訊息
+        if done is not None and done.reason == "complete" and not ephemeral:
+            self._speak(agent, done.reply)
         if ephemeral:
             if done is not None and done.new_messages:
                 self.input_state.last_ephemeral = list(done.new_messages)

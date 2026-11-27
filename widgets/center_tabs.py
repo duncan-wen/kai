@@ -12,13 +12,13 @@ from pathlib import Path
 
 from loguru import logger
 from textual import events, on, work
-from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import TabbedContent, TabPane
 from textual.widgets._content_switcher import ContentSwitcher
 from textual.widgets._tabbed_content import ContentTab, ContentTabs
 
 from .chat import ConfirmCloseScreen, FileViewer
+from .chat_log import ChatLog
 from .utils import _SUFFIX_TO_LANG
 
 
@@ -55,22 +55,22 @@ class CenterTabs(TabbedContent):
         if self.active:
             self.post_message(self.ActiveChanged(self.active))
 
-    def messages_for(self, tab_id: str) -> VerticalScroll:
+    def messages_for(self, tab_id: str) -> ChatLog:
         """回傳 tab 的訊息容器；找不到（例如檔案 tab）時退回 Chat tab 的。"""
         if tab_id != self.CHAT_ID:
             try:
-                return self.get_pane(tab_id).query_one(VerticalScroll)
+                return self.get_pane(tab_id).query_one(ChatLog)
             except Exception:
                 pass
-        return self.get_pane(self.CHAT_ID).query_one(VerticalScroll)
+        return self.get_pane(self.CHAT_ID).query_one(ChatLog)
 
     # ── 開啟 ──────────────────────────────────────────────────────────────────
 
-    async def add_agent_tab(self, tab_id: str, label: str) -> VerticalScroll:
+    async def add_agent_tab(self, tab_id: str, label: str) -> ChatLog:
         """為 agent 開一個 tab（id 由 AgentRegistry 配發），回傳它的訊息容器。"""
-        scroll = VerticalScroll(id=f"msgs-{tab_id}")
-        await self.add_pane(TabPane(f"🤖 {label} ×", scroll, id=tab_id))
-        return scroll
+        log = ChatLog(id=f"msgs-{tab_id}")
+        await self.add_pane(TabPane(f"🤖 {label} ×", log, id=tab_id))
+        return log
 
     @work
     async def open_file(self, path: Path) -> None:
