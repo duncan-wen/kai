@@ -195,6 +195,11 @@ def classify_error(e: BaseException) -> ErrorKind:
     return "other"
 
 
+def _context_saturated(u: Usage) -> bool:
+    """輸入 token 數到了 context window 上限（Ollama 截斷後會回報 num_ctx - 1）。"""
+    return bool(u.num_ctx and u.prompt_tokens and u.prompt_tokens >= u.num_ctx - 1)
+
+
 def parse_tool_args(tc: "ToolCall") -> tuple[dict, str | None]:
     """工具參數 → (args, 錯誤訊息)。空字串視為無參數。"""
     try:
@@ -321,6 +326,20 @@ class _Turn:
 
             if not step.tool_calls:
                 if not step.text:
+                    if _context_saturated(step.usage):
+                        # Ollama 爆 context 不報錯，只截掉前面的內容；模型多半就吐不出東西。
+                        # 不 autocompact：塞滿的通常是本輪的工具結果，壓縮 history 沒用
+                        u = step.usage
+                        logger.warning(f"context 已滿：{u.prompt_tokens}/{u.num_ctx}")
+                        return self._done(
+                            "error",
+                            error=TurnError(
+                                "overflow",
+                                f"輸入 {u.prompt_tokens}/{u.num_ctx} tokens 已到上限，"
+                                "模型讀到的內容被截斷（多半是工具結果太長）。"
+                                "請換大 context 的模型，或調高 num_ctx",
+                            ),
+                        )
                     logger.warning("模型未產生文字回覆（僅思考）")
                     return self._done("empty")
                 reply, prediction = split_prediction(step.text)

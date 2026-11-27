@@ -19,6 +19,7 @@ class Scripted:
     tool_calls: list[ToolCall] = field(default_factory=list)
     gen_tokens: int | None = None
     prompt_tokens: int | None = None
+    num_ctx: int | None = None
     # step 一開始被呼叫（可用來記錄當下狀態）
     on_start: Callable[[], None] | None = None
     # 在第 N 個 chunk 之前送 Delta("reset")（模擬 Ollama XML 重試）
@@ -85,5 +86,9 @@ class FakeModel:
             text="".join(sent),
             thinking=item.thinking,
             tool_calls=list(item.tool_calls),
-            usage=Usage(gen_tokens=item.gen_tokens, prompt_tokens=item.prompt_tokens),
+            usage=Usage(
+                gen_tokens=item.gen_tokens,
+                prompt_tokens=item.prompt_tokens,
+                num_ctx=item.num_ctx,
+            ),
         )
