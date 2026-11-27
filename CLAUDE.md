@@ -63,7 +63,7 @@ mixins/             → ChatApp behaviour split into focused mixins (all inherit
   streaming.py      → StreamingMixin: _send worker, _turn_sink (shared by all turn consumers), TTS playback (run_in_executor thread)
 widgets/
   input.py          → HistoryInput, ChatAutoComplete, PromptSpinner (border_title spinner)
-  center_tabs.py    → CenterTabs(TabbedContent): file tabs, close (unsaved confirm, “×” click), move, messages_for(tab_id) → ChatLog; posts TabClosed / ActiveChanged
+  center_tabs.py    → CenterTabs(TabbedContent): file tabs, close (unsaved confirm, “×” click), move, messages_for(tab_id) → ChatLog; calls before_close(tab_id) synchronously, posts ActiveChanged
   chat_log.py       → ChatLog(VerticalScroll): one tab's message stream (add_user / add_inbox / add_notice / add_error / add_output / render_history); start_reply → ReplySink renders turn events; format_stats, error_text
   prompt_bar.py     → PromptBar: input row (📎 + HistoryInput + autocomplete); owns prompt history, posts PromptBar.Submitted
   slash.py          → slash command table (SlashCommand, @slash); single source for dispatch / autocomplete / palette
@@ -101,7 +101,7 @@ widgets/
 |--------|------|---------|
 | `ChatApp` | app.py | root App, composes all mixins, event handlers |
 | `PromptBar` | widgets/prompt_bar.py | input row: 📎 attach button + `HistoryInput`; owns Up/Down history (`.kai/.prompt_history`), marker expansion, mouse-debris filter; mounts `ChatAutoComplete` on the screen; posts `PromptBar.Submitted(text)` — `ChatApp.on_prompt_bar_submitted` only dispatches (`!` / `/` / chat) |
-| `CenterTabs` | widgets/center_tabs.py | `TabbedContent` subclass: opens / dedups file tabs (`open_file`), adds agent tabs (`add_agent_tab`, id from `AgentRegistry`), closes tabs (`request_close`: `ConfirmCloseScreen` for unsaved files, “×” click), moves tabs (`move_active`), finds a tab's `ChatLog` (`messages_for`); posts `ActiveChanged(tab_id)` (App sets `active_tab` + active agent) and `TabClosed(tab_id)` (App drops agent tabs from the registry) |
+| `CenterTabs` | widgets/center_tabs.py | `TabbedContent` subclass: opens / dedups file tabs (`open_file`), adds agent tabs (`add_agent_tab`, id from `AgentRegistry`), closes tabs (`request_close`: `ConfirmCloseScreen` for unsaved files, “×” click), moves tabs (`move_active`), finds a tab's `ChatLog` (`messages_for`); posts `ActiveChanged(tab_id)` (App sets `active_tab` + active agent). Before removing a pane it calls `before_close(tab_id)` synchronously: `ChatApp._forget_tab` cancels the tab's turns and drops an agent tab from the registry, so no agent outlives its `ChatLog` |
 | `HistoryInput` | widgets/input.py | single-line input: long-text / multiline paste → marker, Ctrl+Z undo, ghost-text prediction; Up/Down post `HistoryInput.Navigate` to `PromptBar` |
 | `ChatAutoComplete` | widgets/input.py | slash command / path autocomplete |
 | `FileTree` | widgets/tree.py | lazy-loading dir tree; double-click opens file tab; Ctrl+click / Space multi-select for batch delete; 2s deep fs watcher |

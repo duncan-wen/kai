@@ -170,7 +170,9 @@ class ChatApp(
         with Horizontal(id="app-grid"):
             yield FileTree(id="file-tree")
             yield ResizeHandle("file-tree", id="file-tree-handle")
-            with CenterTabs(initial="chat", id="center-tabs"):
+            with CenterTabs(
+                initial="chat", id="center-tabs", before_close=self._forget_tab
+            ):
                 with TabPane("💬 Chat", id="chat"):
                     with ChatLog(id="messages"):
                         yield Static(
@@ -546,9 +548,19 @@ class ChatApp(
         if not self.prompt_locked:
             self.query_one("#prompt", HistoryInput).focus()
 
-    def on_center_tabs_tab_closed(self, event: CenterTabs.TabClosed) -> None:
-        if event.tab_id != AgentRegistry.MAIN_ID and self.agents.get(event.tab_id):
-            self.agents.remove(event.tab_id)
+    def _forget_tab(self, tab_id: str) -> None:
+        """CenterTabs 移除 pane 前呼叫：取消該 tab 的 turn，agent tab 從 registry 移除。
+
+        同步執行，之後就不會有 dispatch 找得到 agent 卻找不到它的 ChatLog。
+        """
+        self.cancel_turns(tab_id)
+        if tab_id == AgentRegistry.MAIN_ID or self.agents.get(tab_id) is None:
+            return
+        was_active = self.agents.active_id == tab_id
+        self.agents.remove(tab_id)
+        if was_active:
+            # 退回 main；就算畫面接著切到檔案 tab，側邊欄也不會停在已關掉的 agent
+            self._on_active_agent_changed()
 
     def _switch_to_tab(self, tab_id: str) -> None:
         """程式切換 tab：設 tc.active，並同步設定作用中 Agent（不等非同步的 TabActivated）。"""
@@ -585,7 +597,7 @@ class ChatApp(
         await tabs.request_close(tabs.active)
 
     async def _maybe_close_tab(self, tab_id: str) -> None:
-        """關閉 tab（未存檔檔案會先確認）；agent tab 關掉後由 on_center_tabs_tab_closed 清 registry。"""
+        """關閉 tab（未存檔檔案會先確認）；agent tab 在移除前由 _forget_tab 清 registry。"""
         await self.query_one(CenterTabs).request_close(tab_id)
 
     def action_toggle_sidebar(self) -> None:
