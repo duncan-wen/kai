@@ -43,10 +43,10 @@ Each agent directory contains a `config.json`. All fields:
 |------|------|------|
 | `engine` | `"edge-tts"` | `"edge-tts"` / `"melotts"` / `"kokoro-api"` / `"kokoro"` / `"azure-tts"` |
 | `voice` | 依 engine | 見下方 voice 表 |
-| `lang` | `"en-us"` | 見下方 lang 表 |
+| `lang` | 依 engine | 見下方 lang 表；沒列的 engine 用 `"en-us"` |
 | `player` | `"auto"` | `"auto"` / `"mpg123"` / `"paplay"` / `"ffplay"` / `"mpv"` |
 | `host` | `"localhost"` | Docker server 位址（melotts / kokoro-api 用） |
-| `port` | 8886 | melotts=8886，kokoro-api=8885 |
+| `port` | 依 engine | melotts=8886，kokoro-api=8885 |
 | `speed` | `1.0` | 語速倍率 |
 | `key` | `""` | Azure TTS subscription key（azure-tts 用） |
 | `region` | `""` | Azure region，例如 `"eastasia"`（azure-tts 用） |

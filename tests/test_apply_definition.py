@@ -14,7 +14,7 @@ def defn(**overrides) -> AgentDefinition:
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        (True, {"voice": "en-US-AriaNeural"}),
+        (True, {"engine": "edge-tts"}),
         (
             {"engine": "kokoro", "voice": "af_sky"},
             {"engine": "kokoro", "voice": "af_sky"},
@@ -61,7 +61,7 @@ def test_apply_definition_sets_every_per_agent_field(make_agent):
     assert agent.display_name == "小寫"
     assert agent.history_keep == 3
     assert agent.datasets == ["kb-1"]
-    assert agent.tts_config == {"voice": "en-US-AriaNeural"}
+    assert agent.tts_config == {"engine": "edge-tts"}
     assert "你是專職寫手" in system_text(agent)
     assert agent.mcp_enabled is True
 
@@ -100,7 +100,7 @@ def test_switch_model_keeps_everything_but_the_model(make_agent):
     assert agent.display_name == "小寫"
     assert agent.history_keep == 3
     assert agent.datasets == ["kb-1"]
-    assert agent.tts_config == {"voice": "en-US-AriaNeural"}
+    assert agent.tts_config == {"engine": "edge-tts"}
     assert agent.history[-1] == {"role": "user", "content": "寫一首詩"}
     assert "你是寫手" in system_text(agent)
     assert agent.extra_tools[0]["function"]["name"] == "send_to_agent"

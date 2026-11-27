@@ -10,10 +10,68 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+# 每個 engine 的預設值（唯一來源）；沒列的欄位用 TTSConfig 的欄位預設值
+_ENGINE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "edge-tts": {"voice": "en-US-AriaNeural"},
+    "azure-tts": {"voice": "zh-TW-HsiaoChenNeural", "lang": "zh-TW"},
+    "kokoro": {"voice": "af_sky"},
+    "kokoro-api": {"voice": "af_bella", "port": 8885},
+    "melotts": {"voice": "EN-US", "lang": "en", "port": 8886},
+}
+ENGINES: tuple[str, ...] = tuple(_ENGINE_DEFAULTS)
+
+# /tts 切換 engine 時保留的欄位（與 engine 無關的使用者偏好）
+_PORTABLE_KEYS = ("player", "speed")
+
+
+@dataclass(frozen=True)
+class TTSConfig:
+    """解析後的 TTS 設定；由 agent config.json 的 `tts` 原始 dict 產生。"""
+
+    engine: str = "edge-tts"
+    voice: str = "en-US-AriaNeural"
+    lang: str = "en-us"
+    player: str = "auto"
+    host: str = "localhost"
+    port: int = 8886
+    speed: float = 1.0
+    key: str = ""  # azure-tts；空字串時改讀 AZURE_TTS_* 環境變數
+    region: str = ""
+    endpoint: str = ""
+
+    @classmethod
+    def from_dict(cls, raw: dict | None) -> TTSConfig | None:
+        """依 engine 補預設值；未設定回 None，未知 engine 記 warning 後回 None。"""
+        if not raw:
+            return None
+        engine = raw.get("engine") or "edge-tts"
+        if engine not in _ENGINE_DEFAULTS:
+            logger.warning(
+                f"tts: 未知引擎 {engine!r}（可用：{', '.join(ENGINES)}），不播放"
+            )
+            return None
+        merged = {**_ENGINE_DEFAULTS[engine], **raw, "engine": engine}
+        known = {k: v for k, v in merged.items() if k in cls.__dataclass_fields__}
+        try:
+            known["port"] = int(known.get("port", cls.port))
+            known["speed"] = float(known.get("speed", cls.speed))
+        except (TypeError, ValueError) as e:
+            logger.warning(f"tts: port / speed 格式錯誤：{e}，不播放")
+            return None
+        return cls(**known)
+
+
+def switch_engine(raw: dict | None, engine: str) -> dict:
+    """/tts 切換：只保留 player、speed，其餘欄位交給新 engine 的預設值。"""
+    kept = {k: raw[k] for k in _PORTABLE_KEYS if raw and k in raw}
+    return {"engine": engine, **kept}
+
 
 _PLAYERS_MP3 = ["mpg123", "mpv", "ffplay", "mplayer"]
 _PLAYERS_WAV = ["paplay", "mpg123", "mpv", "ffplay", "mplayer"]
@@ -92,7 +150,7 @@ def _player_cmd(player: str, path: str) -> list[str] | None:
             return [player, path]
 
 
-def _play_file_sync(path: str, player: str = "auto") -> None:
+def _play_file_sync(path: str, player: str) -> None:
     """播放音訊（同步）。TTS 執行緒專用，不觸發 asyncio ThreadedChildWatcher。"""
     use_powershell = player == "powershell"
     cmd: list[str] = []
@@ -214,12 +272,13 @@ def _clean_for_tts(text: str) -> str:
 
 async def _speak_melotts(
     text: str,
-    voice: str = "EN-US",
-    lang: str = "EN",
-    speed: float = 1.0,
-    host: str = "localhost",
-    port: int = 8886,
-    player: str = "auto",
+    *,
+    voice: str,
+    lang: str,
+    speed: float,
+    host: str,
+    port: int,
+    player: str,
 ) -> None:
     """透過 MeloTTS Gradio server（WebSocket queue）生成 WAV 並播放。"""
     try:
@@ -385,9 +444,10 @@ def _chunk_text(text: str, max_chars: int = _KOKORO_CHUNK_CHARS) -> list[str]:
 
 async def _speak_kokoro(
     text: str,
-    voice: str = "af_sky",
-    lang: str = "en-us",
-    player: str = "auto",
+    *,
+    voice: str,
+    lang: str,
+    player: str,
 ) -> None:
     """kokoro-onnx 本地 TTS。模型在 thread executor 跑，不阻塞 event loop。"""
     try:
@@ -455,11 +515,12 @@ async def _speak_kokoro(
 
 async def _speak_kokoro_api(
     text: str,
-    voice: str = "af_bella",
-    speed: float = 1.0,
-    host: str = "localhost",
-    port: int = 8885,
-    player: str = "auto",
+    *,
+    voice: str,
+    speed: float,
+    host: str,
+    port: int,
+    player: str,
 ) -> None:
     """kokoro-fastapi Docker server，OpenAI 相容格式，回傳 WAV bytes。"""
     import urllib.request
@@ -530,13 +591,14 @@ async def _speak_kokoro_api(
 
 async def _speak_azure(
     text: str,
-    voice: str = "zh-TW-HsiaoChenNeural",
-    lang: str = "",
-    speed: float = 1.0,
-    key: str = "",
-    region: str = "",
-    endpoint: str = "",
-    player: str = "auto",
+    *,
+    voice: str,
+    lang: str,
+    speed: float,
+    key: str,
+    region: str,
+    endpoint: str,
+    player: str,
 ) -> None:
     """Azure Cognitive Services TTS REST API（不需安裝 SDK）。
 
@@ -630,56 +692,49 @@ async def _speak_azure(
         Path(tmp).unlink(missing_ok=True)
 
 
-async def speak(
-    text: str,
-    voice: str = "en-US-AriaNeural",
-    player: str = "auto",
-    engine: str = "edge-tts",
-    lang: str = "en-us",
-    host: str = "localhost",
-    port: int = 8886,
-    speed: float = 1.0,
-    key: str = "",
-    region: str = "",
-    endpoint: str = "",
-) -> None:
-    """語音播放。engine 可為 'edge-tts'、'azure-tts'、'kokoro'、'kokoro-api'、'melotts'。"""
+async def speak(text: str, cfg: TTSConfig) -> None:
+    """依 cfg.engine 播放一段語音。"""
     text = _clean_for_tts(text)
     if not text:
         return
 
-    if engine == "azure-tts":
+    if cfg.engine == "azure-tts":
         await _speak_azure(
             text,
-            voice=voice,
-            lang=lang,
-            speed=speed,
-            key=key,
-            region=region,
-            endpoint=endpoint,
-            player=player,
+            voice=cfg.voice,
+            lang=cfg.lang,
+            speed=cfg.speed,
+            key=cfg.key,
+            region=cfg.region,
+            endpoint=cfg.endpoint,
+            player=cfg.player,
         )
         return
 
-    if engine == "kokoro":
-        await _speak_kokoro(text, voice=voice, lang=lang, player=player)
+    if cfg.engine == "kokoro":
+        await _speak_kokoro(text, voice=cfg.voice, lang=cfg.lang, player=cfg.player)
         return
 
-    if engine == "kokoro-api":
+    if cfg.engine == "kokoro-api":
         await _speak_kokoro_api(
-            text, voice=voice, speed=speed, host=host, port=port, player=player
+            text,
+            voice=cfg.voice,
+            speed=cfg.speed,
+            host=cfg.host,
+            port=cfg.port,
+            player=cfg.player,
         )
         return
 
-    if engine == "melotts":
+    if cfg.engine == "melotts":
         await _speak_melotts(
             text,
-            voice=voice,
-            lang=lang.upper(),
-            speed=speed,
-            host=host,
-            port=port,
-            player=player,
+            voice=cfg.voice,
+            lang=cfg.lang.upper(),
+            speed=cfg.speed,
+            host=cfg.host,
+            port=cfg.port,
+            player=cfg.player,
         )
         return
 
@@ -693,9 +748,9 @@ async def speak(
     fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="kai_tts_")
     os.close(fd)
     try:
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(text, cfg.voice)
         await communicate.save(tmp)
-        await _play_async(tmp, player)
+        await _play_async(tmp, cfg.player)
     except Exception as e:
         logger.warning(f"tts 失敗：{e}")
     finally:

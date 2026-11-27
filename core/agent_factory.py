@@ -11,8 +11,6 @@ from pydantic import BaseModel, field_validator
 
 REQUIRED_FIELDS = {"name", "model", "system_prompt"}
 
-DEFAULT_TTS_VOICE = "en-US-AriaNeural"
-
 
 class AgentDefinition(BaseModel):
     """磁碟上 agents/<name>/config.json 的內容；開啟或 reload 時套用到 Agent。"""
@@ -33,9 +31,9 @@ class AgentDefinition(BaseModel):
     @field_validator("tts", mode="before")
     @classmethod
     def _normalize_tts(cls, raw: Any) -> dict | None:
-        """True → 預設語音；非空 dict → 原樣；其他（False、{}、None）→ 不啟用。"""
+        """True → edge-tts 預設語音；非空 dict → 原樣；其他（False、{}、None）→ 不啟用。"""
         if raw is True:
-            return {"voice": DEFAULT_TTS_VOICE}
+            return {"engine": "edge-tts"}
         if isinstance(raw, dict) and raw:
             return raw
         return None

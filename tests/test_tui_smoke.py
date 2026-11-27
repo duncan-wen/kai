@@ -834,3 +834,13 @@ def test_opening_same_file_twice_concurrently_gives_one_tab(
         assert tabs.tab_order() == ["chat", tabs.active]
 
     _run(app_factory, body)
+
+
+def test_set_tts_tool_reports_unknown_engine(app_factory) -> None:
+    async def body(app, pilot: Pilot) -> None:
+        bad = await app._app_set_tts("kokoro_api")
+        assert bad.startswith("❌") and app.agent.tts_config is None
+        ok = await app._app_set_tts("Kokoro-API")
+        assert ok.startswith("✅") and app.agent.tts_config == {"engine": "kokoro-api"}
+
+    _run(app_factory, body)

@@ -285,7 +285,15 @@ SET_TTS_TOOL = {
             "properties": {
                 "engine": {
                     "type": "string",
-                    "description": "語音引擎：edge-tts / azure-tts / melotts / kokoro-api / kokoro / off",
+                    "enum": [
+                        "edge-tts",
+                        "azure-tts",
+                        "melotts",
+                        "kokoro-api",
+                        "kokoro",
+                        "off",
+                    ],
+                    "description": "語音引擎",
                 },
             },
             "required": ["engine"],

@@ -429,39 +429,33 @@ class ChatApp(
         return files
 
     def _do_tts_switch(self, arg: str) -> None:
-        _ENGINES = ("edge-tts", "azure-tts", "kokoro", "kokoro-api", "melotts", "off")
+        from core.tts import ENGINES, TTSConfig, switch_engine
+
         engine = arg.strip().lower()
+        raw = getattr(self.agent, "tts_config", None)
         if not engine:
-            cfg = getattr(self.agent, "tts_config", None)
-            if cfg:
-                self.notify(
-                    f"TTS 目前：{cfg.get('engine', 'edge-tts')}  voice={cfg.get('voice', '—')}",
-                    timeout=4,
-                )
+            cur = TTSConfig.from_dict(raw)
+            if cur:
+                self.notify(f"TTS 目前：{cur.engine}  voice={cur.voice}", timeout=4)
             else:
                 self.notify("TTS 已關閉（此 agent 無 tts 設定）", timeout=3)
-            return
-        if engine not in _ENGINES:
-            self.notify(
-                f"未知引擎：{engine}  可用：{', '.join(_ENGINES)}", severity="warning"
-            )
             return
         if engine == "off":
             self.agent.tts_config = None
             self.notify("TTS 已關閉", timeout=3)
             return
-        _defaults: dict[str, dict] = {
-            "kokoro": {"voice": "af_sky", "lang": "en-us"},
-            "kokoro-api": {"voice": "af_bella", "lang": "en-us", "port": 8885},
-            "melotts": {"voice": "EN-US", "lang": "en", "port": 8886},
-            "edge-tts": {"voice": "en-US-AriaNeural", "lang": "en-us"},
-            "azure-tts": {"voice": "zh-TW-HsiaoChenNeural", "lang": "zh-TW"},
-        }
-        cfg = dict(getattr(self.agent, "tts_config", None) or {})
-        cfg.update({"engine": engine, **_defaults[engine]})
-        self.agent.tts_config = cfg
-        voice_info = cfg["voice"]
-        if engine == "azure-tts" and not (cfg.get("key") or _kai_cfg.AZURE_TTS_KEY):
+        if engine not in ENGINES:
+            self.notify(
+                f"未知引擎：{engine}  可用：{', '.join((*ENGINES, 'off'))}",
+                severity="warning",
+            )
+            return
+        new_raw = switch_engine(raw, engine)
+        self.agent.tts_config = new_raw
+        cfg = TTSConfig.from_dict(new_raw)
+        assert cfg is not None
+        voice_info = cfg.voice
+        if engine == "azure-tts" and not _kai_cfg.AZURE_TTS_KEY:
             voice_info += "  ⚠️ 需設定 AZURE_TTS_KEY"
         self.notify(f"TTS 切換為：{engine}  voice={voice_info}", timeout=4)
 
