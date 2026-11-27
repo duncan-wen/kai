@@ -58,6 +58,11 @@ class TurnRequest:
 
 
 @dataclass(frozen=True)
+class ThinkingStarted:
+    """本 step 收到第一段思考內容。"""
+
+
+@dataclass(frozen=True)
 class ThinkingDone:
     """本 step 的思考結束：開始出文字時送一次；只思考沒文字時在 step 結束送。"""
 
@@ -131,7 +136,14 @@ class Done:
 
 
 TurnEvent = Union[
-    ThinkingDone, Token, StepReset, ToolEvent, Compacting, Compacted, Done
+    ThinkingStarted,
+    ThinkingDone,
+    Token,
+    StepReset,
+    ToolEvent,
+    Compacting,
+    Compacted,
+    Done,
 ]
 Sink = Callable[[TurnEvent], Awaitable[None]]
 
@@ -309,6 +321,8 @@ class _Turn:
                         "error", error=TurnError("other", f"壓縮失敗：{e}")
                     )
                 await self.sink(Compacted())
+                if self.cancel.cancelled:
+                    return self._done("cancelled")
 
     async def _loop(self) -> Done:
         agent = self.agent
@@ -325,7 +339,8 @@ class _Turn:
                 asst["reasoning_content"] = step.thinking
 
             if not step.tool_calls:
-                if not step.text:
+                reply, prediction = split_prediction(step.text)
+                if not reply:
                     if _context_saturated(step.usage):
                         # Ollama 爆 context 不報錯，只截掉前面的內容；模型多半就吐不出東西。
                         # 不 autocompact：塞滿的通常是本輪的工具結果，壓縮 history 沒用
@@ -342,7 +357,6 @@ class _Turn:
                         )
                     logger.warning("模型未產生文字回覆（僅思考）")
                     return self._done("empty")
-                reply, prediction = split_prediction(step.text)
                 asst["content"] = reply
                 return await self._finish("complete", reply, asst, prediction)
 
@@ -410,6 +424,8 @@ class _Turn:
         async def on_delta(d: Delta) -> None:
             nonlocal text, thinking_sent
             if d.kind == "thinking":
+                if not thinking:
+                    await self.sink(ThinkingStarted())
                 thinking.append(d.text)
             elif d.kind == "reset":
                 text = ""
@@ -450,8 +466,9 @@ class _Turn:
         return step
 
 
-def _user_text(user_msg: dict) -> str:
-    content = user_msg.get("content")
+def user_text(msg: dict) -> str:
+    """訊息的文字內容；多模態 content（list）只取文字段落。"""
+    content = msg.get("content")
     if isinstance(content, list):
         return " ".join(
             b.get("text", "")
@@ -459,6 +476,18 @@ def _user_text(user_msg: dict) -> str:
             if isinstance(b, dict) and b.get("type") == "text"
         )
     return str(content or "")
+
+
+_INBOX_SENDER = "_inbox_sender"
+
+
+def inbox_message(sender: str, content: str) -> dict:
+    """其他 agent 送來的 user 訊息；sender 會跟著存進 history，畫面據此顯示 inbox 泡泡。"""
+    return {"role": "user", "content": content, _INBOX_SENDER: sender}
+
+
+def inbox_sender(msg: dict) -> str | None:
+    return msg.get(_INBOX_SENDER)
 
 
 def _session_ids(history_file: "Path") -> tuple[str, str]:
@@ -495,7 +524,7 @@ async def run_turn(
                 user_id=_cfg.USERNAME or None,
                 # Langfuse Sessions（Messages 視圖）只讀 trace 根節點的 input/output，
                 # 且必須是 {"role", "content"} 形狀才渲染得成對話泡泡。
-                input=user_message(_user_text(request.user_msg)[:2000]),
+                input=user_message(user_text(request.user_msg)[:2000]),
                 metadata=meta,
             ) as span:
                 done = await turn.run()

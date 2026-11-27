@@ -30,10 +30,10 @@ _FS_MUTATING = frozenset(
 
 class StreamingMixin(_MixinBase):
     def _turn_sink(
-        self, log: ChatLog, agent: "Agent", spinner: PromptSpinner
+        self, chat: ChatLog, agent: "Agent", spinner: PromptSpinner
     ) -> Callable[[TurnEvent], Awaitable[None]]:
         """三個 turn 消費者共用的 sink：畫到 ChatLog，並同步檔案樹 / git。"""
-        reply = log.start_reply(
+        reply = chat.start_reply(
             agent,
             debug=self.debug_tools,
             on_phase=lambda label: setattr(spinner, "label", label),
@@ -59,10 +59,10 @@ class StreamingMixin(_MixinBase):
         ephemeral: bool = False,
         original_text: str | None = None,
     ) -> None:
-        # 快照 agent 與 log：worker 執行期間 self.agent 可能因 tab 切換被替換，
+        # 快照 agent 與 chat（訊息容器）：worker 執行期間 self.agent 可能因 tab 切換被替換，
         # 固定使用送出當下的 agent，避免回覆跑到錯誤的 tab。
         agent = self.agent
-        log = self._active_msgs()
+        chat = self._active_msgs()
         prompt = self.query_one("#prompt", HistoryInput)
         done: Done | None = None
 
@@ -77,9 +77,8 @@ class StreamingMixin(_MixinBase):
         spinner = PromptSpinner(
             prompt, "等待回覆", visible=lambda: self.active_tab == _my_tab_id
         )
-        sink = self._turn_sink(log, agent, spinner)
+        sink = self._turn_sink(chat, agent, spinner)
 
-        # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
         self.mark_busy(_my_tab_id, cancel)
         try:
             # 只在送出時的 tab 上畫：切到別的 tab 時不蓋掉那邊的標題
@@ -101,7 +100,7 @@ class StreamingMixin(_MixinBase):
         except Exception as e:
             # run_turn 只有程式 bug 才 raise；接住以免 @work 關掉整個 app
             logger.exception("turn 執行例外")
-            await log.add_error(f"❌ 錯誤：{e}")
+            await chat.add_error(f"❌ 錯誤：{e}")
 
         finally:
             spinner.stop()
@@ -136,7 +135,7 @@ class StreamingMixin(_MixinBase):
             self.tab_state.pending_open_agent = None
             await self._do_load_agent(_pending)
 
-    def _speak(self, agent, text: str) -> None:
+    def _speak(self, agent: "Agent", text: str) -> None:
         """TTS：整段回覆完成後在獨立執行緒播放，完全隔離 Textual event loop。"""
         tts_cfg = getattr(agent, "tts_config", None)
         if not tts_cfg or not text:

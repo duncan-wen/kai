@@ -294,7 +294,7 @@ def test_think_toggle_via_cap_bar_click(app_factory) -> None:
 
 
 def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
-    """busy_tabs + active_tab 決定 prompt 鎖定；切 tab 自動鎖／解鎖，重疊工作要全部結束才解鎖。"""
+    """busy_jobs + active_tab 決定 prompt 鎖定；切 tab 自動鎖／解鎖，重疊工作要全部結束才解鎖。"""
 
     async def body(app, pilot: Pilot) -> None:
         from textual.widgets import TabbedContent
@@ -335,7 +335,7 @@ def test_prompt_lock_follows_busy_tab(app_factory, tmp_path: Path) -> None:
 
         # 多 unmark 不會出錯
         app.unmark_busy("chat")
-        assert app.busy_tabs == ()
+        assert app.busy_jobs == ()
 
     _run(app_factory, body)
 
@@ -692,5 +692,21 @@ def test_dispatch_renders_inbox_reply_and_stats(app_factory) -> None:
         assert "2 tokens" in str(msgs.query_one(".stats").render())
         assert app.agent.history[-1] == {"role": "assistant", "content": "收到"}
         assert not app.prompt_locked
+
+    _run(app_factory, body)
+
+
+def test_dispatch_error_on_visible_tab_is_not_toasted_twice(app_factory) -> None:
+    """目標 tab 就在畫面上：錯誤只畫在聊天區，不另外跳通知。"""
+    from tests.fake_model import FakeModel
+
+    async def body(app, pilot: Pilot) -> None:
+        app.agent.model_stream = FakeModel([TimeoutError("卡住了")])
+        app._dispatch_to_agent("小助理", "chat", "幫我查一下")
+        await _wait_turn(app, pilot)
+
+        errors = [str(s.render()) for s in app._active_msgs().query(".error-msg")]
+        assert any("卡住了" in e for e in errors)
+        assert not any("處理 小助理 的訊息失敗" in n for n in _notifications(app))
 
     _run(app_factory, body)

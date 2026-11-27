@@ -8,7 +8,7 @@ from core.agent import Agent
 from core.agent_factory import read_definition
 from core.agent_registry import AgentRegistry
 from core.model_stream import CancelToken
-from core.turn import TurnRequest, run_turn
+from core.turn import TurnRequest, inbox_message, run_turn
 from widgets.center_tabs import CenterTabs
 from widgets.input import HistoryInput, PromptSpinner
 from typing import TYPE_CHECKING
@@ -99,16 +99,16 @@ class AgentsMixin(_MixinBase):
         )
         self._apply_definition(agent, defn)
         tab_id = self.agents.add(agent)  # 配 tab id，並接上目前的 MCP
-        log = await self.query_one(CenterTabs).add_agent_tab(tab_id, defn.display_name)
+        chat = await self.query_one(CenterTabs).add_agent_tab(tab_id, defn.display_name)
         self._switch_to_tab(tab_id)
-        await log.render_history(agent)
+        await chat.render_history(agent)
         self.notify(f"✅ 已開啟 agent：{defn.name}", timeout=3)
         self._inject_interagent_tools(agent)
         # 若 config 有 greeting 且是全新對話，觸發 AI 主動開場
         greeting = defn.greeting.strip()
         fresh = not any(m.get("role") != "system" for m in agent.history)
         if greeting and fresh and self.ui_state.greeting_enabled:
-            self._trigger_greeting(agent, log, greeting)
+            self._trigger_greeting(agent, chat, greeting)
 
     def on_agent_message(self, event: "AgentMessage") -> None:
         """Textual event：將 AgentMessage 路由到目標 agent。"""
@@ -131,7 +131,7 @@ class AgentsMixin(_MixinBase):
         if agent is None:
             logger.warning(f"[inbox] dispatch: 目標 tab 已關閉：{target_tab_id}")
             return
-        log = self.query_one(CenterTabs).messages_for(target_tab_id)
+        chat = self.query_one(CenterTabs).messages_for(target_tab_id)
 
         cancel = CancelToken()
         prompt = self.query_one("#prompt", HistoryInput)
@@ -141,7 +141,7 @@ class AgentsMixin(_MixinBase):
             "等待回覆",
             visible=lambda: self.active_tab == target_tab_id,
         )
-        sink = self._turn_sink(log, agent, spinner)
+        sink = self._turn_sink(chat, agent, spinner)
 
         if target_tab_id == AgentRegistry.MAIN_ID:
             full_content = content
@@ -155,21 +155,17 @@ class AgentsMixin(_MixinBase):
         logger.info(f"[inbox] dispatch: {sender} → {agent.display_name}")
         # 其他 agent 送進來的訊息也算新對話：目標 session 不再是 resumed session
         self._session_store(agent).mark_active()
-        # 目標 tab 標成忙碌；mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
         self.mark_busy(target_tab_id, cancel)
         try:
             spinner.start()
-            await log.add_inbox(sender, content)
+            await chat.add_inbox(sender, content)
             done = await run_turn(
-                agent,
-                TurnRequest(
-                    {"role": "user", "content": full_content, "_inbox_sender": sender}
-                ),
-                sink,
-                cancel,
+                agent, TurnRequest(inbox_message(sender, full_content)), sink, cancel
             )
             if done.error is not None:
                 logger.error(f"[inbox] {agent.display_name} 處理失敗：{done.error}")
+            if done.error is not None and self.active_tab != target_tab_id:
+                # 錯誤已畫在目標 tab；使用者不在那個 tab 時才另外跳通知
                 self.notify(
                     f"{agent.display_name} 處理 {sender} 的訊息失敗：{done.error.message}",
                     severity="error",
@@ -177,14 +173,14 @@ class AgentsMixin(_MixinBase):
         except Exception as e:
             # @work 預設 exit_on_error：未接住的例外會讓整個 app 關閉
             logger.exception(f"[inbox] {agent.display_name} 處理失敗")
-            await log.add_error(f"❌ 錯誤：{e}")
+            await chat.add_error(f"❌ 錯誤：{e}")
         finally:
             spinner.stop()
             self.unmark_busy(target_tab_id, cancel)
 
     @work
     async def _trigger_greeting(
-        self, agent: "Agent", log: "ChatLog", greeting_prompt: str
+        self, agent: "Agent", chat: "ChatLog", greeting_prompt: str
     ) -> None:
         """讓 agent 主動說第一句話。trigger 不存入 history，只保留 assistant 回覆。"""
         prompt = self.query_one("#prompt", HistoryInput)
@@ -195,9 +191,8 @@ class AgentsMixin(_MixinBase):
             f"{agent.display_name} 開場中…",
             visible=lambda: self.active_tab == my_tab,
         )
-        sink = self._turn_sink(log, agent, spinner)
+        sink = self._turn_sink(chat, agent, spinner)
 
-        # mark_busy 緊接 try：之後任何例外都會走到 finally 解鎖
         self.mark_busy(my_tab, cancel)
         try:
             spinner.start()

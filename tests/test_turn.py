@@ -99,7 +99,15 @@ def test_thinking_done_sent_once_before_text(make_agent):
     agent = make_agent([reply("a", "b", thinking="嗯")])
     _, events = run(agent, TurnRequest(user()))
     kinds = [type(e).__name__ for e in events]
-    assert kinds == ["ThinkingDone", "Token", "Token", "Done"]
+    assert kinds == ["ThinkingStarted", "ThinkingDone", "Token", "Token", "Done"]
+
+
+def test_prediction_only_reply_is_empty_and_not_committed(make_agent):
+    agent = make_agent([reply("<next>下一題</next>")])
+    done, _ = run(agent, TurnRequest(user()))
+
+    assert done.reason == "empty"
+    assert non_system(agent) == []
 
 
 def test_step_reset_forwarded(make_agent):
@@ -283,6 +291,22 @@ def test_overflow_compacts_and_retries_same_message(make_agent):
     retry = agent.model_stream.calls[1].messages
     assert retry[-1] == msg
     assert retry[-2] == {"role": "assistant", "content": "[對話摘要]"}
+
+
+def test_cancel_during_compact_skips_retry(make_agent):
+    agent = make_agent([RuntimeError("context length exceeded"), reply("不該出現")])
+    cancel = CancelToken()
+
+    async def compact() -> str:
+        cancel.cancel()
+        return "摘要"
+
+    agent.compact_history = compact
+    agent.compact_available = lambda: True
+    done, _ = run(agent, TurnRequest(user()), cancel)
+
+    assert done.reason == "cancelled"
+    assert len(agent.model_stream.calls) == 1
 
 
 def test_overflow_twice_gives_error(make_agent):

@@ -131,8 +131,10 @@ class ChatApp(
     """作用中 Agent 的顯示快照；改了 agent 狀態後呼叫 refresh_agent_view()。"""
     active_tab: reactive[str] = reactive("chat", init=False)
     """畫面上的 center tab id（含檔案 tab）。"""
-    busy_tabs: reactive[tuple[str, ...]] = reactive((), init=False)
-    """有工作在跑的 tab id；可重複（同一 tab 同時有兩件工作）。用 mark_busy / unmark_busy 改。"""
+    busy_jobs: reactive[tuple[tuple[str, CancelToken | None], ...]] = reactive(
+        (), init=False
+    )
+    """進行中的工作：(tab id, turn 的 CancelToken 或 None)；同一 tab 可有多件。用 mark_busy / unmark_busy 改。"""
     prompt_locked: reactive[bool] = reactive(False, init=False)
     """目前 tab 是否忙碌（compute_prompt_locked）；綁到 PromptBar.locked → HistoryInput.locked。"""
 
@@ -162,8 +164,6 @@ class ChatApp(
         self.set_reactive(ChatApp.debug_tools, _kai_cfg.DEBUG_TOOLS)
         self._mcp_initializing = True
         self.tab_state = TabState()
-        # 進行中 turn 的取消旗標：(tab_id, CancelToken)，由 mark_busy / unmark_busy 維護
-        self._turn_cancels: list[tuple[str, CancelToken]] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -499,30 +499,26 @@ class ChatApp(
             )
 
     def compute_prompt_locked(self) -> bool:
-        return self.active_tab in self.busy_tabs
+        return any(tid == self.active_tab for tid, _ in self.busy_jobs)
 
     def mark_busy(self, tab_id: str, cancel: "CancelToken | None" = None) -> None:
         """標記 tab 開始一件工作；該 tab 在畫面上時 prompt 會鎖住。
 
         帶 cancel 的工作（turn）在使用者於該 tab 按 Esc 時會被取消。
         """
-        self.busy_tabs = (*self.busy_tabs, tab_id)
-        if cancel is not None:
-            self._turn_cancels.append((tab_id, cancel))
+        self.busy_jobs = (*self.busy_jobs, (tab_id, cancel))
 
     def unmark_busy(self, tab_id: str, cancel: "CancelToken | None" = None) -> None:
         """結束 tab 的一件工作；全部結束且該 tab 在畫面上時 prompt 解鎖並 focus。"""
-        busy = list(self.busy_tabs)
-        if tab_id in busy:
-            busy.remove(tab_id)
-        self.busy_tabs = tuple(busy)
-        if cancel is not None and (tab_id, cancel) in self._turn_cancels:
-            self._turn_cancels.remove((tab_id, cancel))
+        jobs = list(self.busy_jobs)
+        if (tab_id, cancel) in jobs:
+            jobs.remove((tab_id, cancel))
+        self.busy_jobs = tuple(jobs)
 
     def cancel_turns(self, tab_id: str) -> None:
         """取消該 tab 上所有進行中的 turn。"""
-        for tid, cancel in self._turn_cancels:
-            if tid == tab_id:
+        for tid, cancel in self.busy_jobs:
+            if tid == tab_id and cancel is not None:
                 cancel.cancel()
 
     def watch_think_override(self) -> None:
@@ -545,7 +541,7 @@ class ChatApp(
         """切換到 agent tab（或 chat tab）時把它設為作用中的 Agent；檔案 tab 不改變作用中的 Agent。"""
         if self.agents.activate(event.tab_id):
             self._on_active_agent_changed()
-        # prompt 鎖定由 prompt_locked（active_tab ∈ busy_tabs）決定
+        # prompt 鎖定由 prompt_locked（active_tab 有沒有在 busy_jobs 裡）決定
         self.active_tab = event.tab_id
         if not self.prompt_locked:
             self.query_one("#prompt", HistoryInput).focus()

@@ -17,6 +17,7 @@ from core.turn import (
     Done,
     StepReset,
     ThinkingDone,
+    ThinkingStarted,
     Token,
     ToolEvent,
     TurnError,
@@ -66,13 +67,14 @@ def test_reply_renders_header_bubble_and_stats() -> None:
         phases = await _play(
             log,
             [
+                ThinkingStarted(),
                 ThinkingDone("想一下", 0.5),
                 Token("哈", "哈"),
                 Token("囉", "哈囉"),
                 Done("complete", reply="哈囉", stats=stats),
             ],
         )
-        assert phases == ["思考中", "生成中", "生成中"]
+        assert phases == ["思考中", "生成中", "生成中"]  # ThinkingDone 不改階段
         assert _texts(log, ".ai-header") == ["🤖 小幫手"]
         assert [m._raw for m in log.query(AIMessage)] == ["哈囉"]
         assert _titles(log) == ["💡 思考過程"]
@@ -133,6 +135,21 @@ def test_error_and_cancel_keep_partial_text_without_stats() -> None:
         assert [m._raw for m in log.query(AIMessage)] == ["一半"]
         assert _texts(log, ".error-msg") == ["⏱ 模型無回應（逾時）：卡住"]
         assert _texts(log, ".stats") == []
+
+    _run(body)
+
+
+def test_step_reset_text_not_restored_on_error() -> None:
+    async def body(log: ChatLog) -> None:
+        await _play(
+            log,
+            [
+                Token("作廢", "作廢"),
+                StepReset(),
+                Done("error", error=TurnError("other", "壞了")),
+            ],
+        )
+        assert [m._raw for m in log.query(AIMessage)] == [""]
 
     _run(body)
 
