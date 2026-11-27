@@ -25,6 +25,12 @@ docker compose up -d
 docker compose --profile tts --profile db up -d
 ```
 
+## Reference docs
+
+- `docs/configuration.md`: read before changing agent `config.json` fields, system-prompt template variables, TTS settings, env vars / `.kai/config.json`, MCP server config, or SearXNG.
+- `docs/usage.md`: user-facing slash commands, `!` bash, file tree, key bindings.
+- Logs: `.kai/agent_tui.log` (loguru); `.kai/tool_calls.log` when `DEBUG_TOOLS=1`.
+
 ## Architecture
 
 Single entry point (`app.py`) on top of a UI-independent core:
@@ -72,7 +78,7 @@ widgets/
   utils.py          → shared TUI utilities: _copy_to_clipboard, file icons, _line_height, _wrap_box_drawing
 ```
 
-`core/` must not import `widgets/`. `widgets/` may import `core/`. Both layers use relative imports internally.
+`core/` must not import `widgets/` or Textual (`core/ruff.toml` bans them). `widgets/` may import `core/`. Both layers use relative imports internally.
 
 ## TUI (`app.py`)
 
@@ -114,38 +120,9 @@ widgets/
 
 ### Slash commands
 
-| Command | Action |
-|---------|--------|
-| `/clear` | Clear the chat screen only (history kept) |
-| `/cls` | Archive history to `.history/`, then clear memory and UI (guard: skips if only system msg) |
-| `/resume [N]` | List or restore archived sessions (ResumeScreen picker) |
-| `/rename <name>` | Name current session (shown in ResumeScreen) |
-| `/compact` | Compress history with Gemini to free context window |
-| `/model <name>` | Switch model (hot-swap, preserves history) |
-| `/nickname [name]` | Query or set display nickname for current model |
-| `/cd <path>` | Change directory (saves old history, loads new) |
-| `/think` | Toggle thinking mode |
-| `/debug` | Toggle tool debug cards |
-| `/image <path> [q]` | Send image to vision model |
-| `/ask <question>` | Ephemeral question — not saved to history |
-| `/save` | Promote last `/ask` answer into permanent history |
-| `/remember <note>` | Write note to `.kai/notes.md` (persistent across sessions) |
-| `/mcp-list` | Show connected MCP servers and tool descriptions |
-| `/mcp-reload` | Restart MCP servers without quitting the app |
-| `/mcp-add <name> <cmd> [args...]` | Add a new MCP server to `mcp_servers.json` |
-| `/mcp-del <name>` | Remove an MCP server from `mcp_servers.json` |
-| `/create-agent <description>` | Use AI (CREATE_AGENT_MODEL) to design a new agent config in `agents/` |
-| `/load-agent <name>` | Load an agent config and spawn a new tab (dedup: switches to existing tab if already open) |
-| `/list-agents` | Show all agents in `agents/` (AgentsScreen picker) |
-| `/delete-agent [name]` | Delete agent(s); omit name to open multi-select panel |
-| `/close-agent [name]` | Close an agent tab; omit name to close the current tab |
-| `/greeting on\|off` | Toggle subagent opening greeting |
-| `/reload-agent` | Re-read `config.json` and hot-swap system prompt, model, nickname, tts in running agent |
-| `/reload-config` | Re-read `.kai/config.json` and apply all settings to the running process |
-| `/init-config` | Open interactive ConfigScreen: select keys, L→`cwd/.kai/config.json`, G→`~/.kai/config.json` |
-| `/tts <engine\|off>` | Switch TTS engine or disable: `edge-tts`, `melotts`, `kokoro-api`, `kokoro`, `azure-tts`, `off` (in-memory only; does not persist to config.json) |
+The full list is the `@slash(...)` decorators in `mixins/commands.py`; user docs in `docs/usage.md`.
 
-Adding a slash command: write `async def _cmd_xxx(self, arg: str) -> None` in `mixins/commands.py` with `@slash("/xxx", "說明", needs_arg=..., presets=...)`. Prompt submit, autocomplete and the Ctrl+P palette all read the same table; `needs_arg=True` makes the palette fill the prompt instead of running. Don't add `if cmd == ...` branches to `on_input_submitted`.
+Adding a slash command: write `async def _cmd_xxx(self, arg: str) -> None` in `mixins/commands.py` with `@slash("/xxx", "說明", needs_arg=..., presets=...)`. Prompt submit, autocomplete and the Ctrl+P palette all read the same table; `needs_arg=True` makes the palette fill the prompt instead of running. Dispatch stays in that table: `on_prompt_bar_submitted` has no per-command branches.
 
 Prompt input reaches the App only as `PromptBar.Submitted(text)` (marker already expanded, history already recorded). Don't handle `Input.Submitted` on the App or read `HistoryInput`'s `_multiline_*` fields from outside; to put text into the prompt use `PromptBar.attach(path)` or set `prompt.value`.
 
@@ -172,18 +149,6 @@ Any input starting with `!` runs as a shell command via `/bin/bash -c` (supports
 Special case:
 - `!cd <path>` — intercepted, calls `os.chdir` (subprocess `cd` has no effect on parent process)
 - After every bash command: file tree and git sidebar auto-refresh
-
-### File tree multi-select
-
-| Operation | Effect |
-|-----------|--------|
-| `Ctrl+click` | Toggle item in multi-select (shows green ✓) |
-| `Space` | Toggle cursor item; if anchor set, range-select from anchor to cursor |
-| `Ctrl+A` | Select all / deselect all visible nodes |
-| `Escape` | Clear multi-select (if none, focus prompt) |
-| Right-click on selected item | Shows "刪除選取 (N 項)" for batch delete |
-
-Multi-select state is cleared after delete and after `refresh_tree`.
 
 ### File tree filesystem watcher
 
@@ -240,23 +205,6 @@ When pasting multiline text into the prompt:
 
 `_copy_to_clipboard()` in `widgets/utils.py` tries `xclip` first, then `clip.exe` with UTF-16-LE + BOM (`\xff\xfe`). BOM is required for `clip.exe` to treat input as Unicode; without it CJK characters become mojibake. All `subprocess.run` clipboard calls have `timeout=3` to prevent blocking app shutdown.
 
-### Key bindings
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+Q` | Quit |
-| `Ctrl+P` | Command palette |
-| `Ctrl+T` | Toggle file tree |
-| `Ctrl+B` | Toggle sidebar |
-| `Ctrl+W` | Close active tab (priority binding) |
-| `Escape` | Cancel streaming response / clear tree multi-select |
-| `↑ / ↓` | Navigate input history |
-| `Ctrl+Z` | Undo in input |
-| `Space` (in tree) | Toggle current node in multi-select / range-select from anchor |
-| `Ctrl+A` (in tree) | Select all / deselect all |
-| `Ctrl+S` (FileViewer) | Save file |
-| `F2` (FileViewer) | Save As (Ctrl+Shift+S is indistinguishable from Ctrl+S in most terminals) |
-
 ## Agent (`core/agent.py`)
 
 ### Turn (`core/turn.py`)
@@ -273,7 +221,7 @@ When pasting multiline text into the prompt:
 
 Backend differences live behind the `ModelStream` seam (`core/model_stream.py`); the turn uses a neutral message format and adapters in `core/backends.py` convert it to wire format. Tests swap in `tests/fake_model.py::FakeModel` via `agent.model_stream = FakeModel([...])`.
 
-UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with the same sink, `StreamingMixin._turn_sink(log, agent, spinner)`: `ChatLog.start_reply` draws it, the wrapper refreshes file tree / git. Consumers only add what is theirs (TTS and prediction in `_send`, inbox bubble and error toast in dispatch). Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `await agent.commit(done.new_messages)`. Call `mark_busy` immediately before the `try` whose `finally` unmarks it.
+UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn` with the same sink, `StreamingMixin._turn_sink(log, agent, spinner)`: `ChatLog.start_reply` draws it, the wrapper refreshes file tree / git. Consumers only add what is theirs (TTS and prediction in `_send`, inbox bubble and error toast in dispatch). Each turn's `CancelToken` is registered with `mark_busy(tab_id, cancel)` / `unmark_busy(tab_id, cancel)`; Esc calls `cancel_turns(active_tab)`. `/ask` uses `persist="none"` and `/save` calls `await agent.commit(done.new_messages)`. Call `mark_busy` immediately before the `try` whose `finally` unmarks it (`tests/test_conventions.py` enforces this, and that every `classes=` name has a style).
 
 ### History
 
@@ -289,24 +237,7 @@ UI consumers (`_send`, `_dispatch_to_agent`, `_trigger_greeting`) call `run_turn
 
 ### Adding a new model
 
-Add one entry to `REGISTRY` in `core/models.py`:
-
-| 模型 | thinking | vision | tools | backend |
-|------|----------|--------|-------|---------|
-| `deepseek-r1:1.5b` | ✓ | - | ✗ | ollama |
-| `qwen2.5-coder:3b` | - | - | ✗ | ollama |
-| `qwen3.5:2b` | - | ✓ | ✓ | ollama |
-| `qwen3-vl:4b` | ✓ | ✓ | ✓ | ollama |
-| `qwen3.5:4b` | ✓ | ✓ | ✓ | ollama |
-| `gemma4:e2b` | ✓ | ✓ | ✓ | ollama |
-| `gemma4:e4b` | ✓ | ✓ | ✓ | ollama |
-| `deepseek-flash` | ✓ | - | ✓ | deepseek |
-| `deepseek-v4-pro` | ✓ | - | ✓ | deepseek |
-| `gemini-2.0-flash` | - | ✓ | ✓ | gemini |
-| `gemini-2.5-flash` | ✓ | ✓ | ✓ | gemini |
-| `gemini-2.5-pro` | ✓ | ✓ | ✓ | gemini |
-
-`get_profile()` returns a `dataclasses.replace()` copy to avoid mutating REGISTRY. `NUM_CTX` in `.env` overrides all profiles at runtime.
+Add one entry to `REGISTRY` in `core/models.py`. `get_profile()` returns a `dataclasses.replace()` copy to avoid mutating REGISTRY. `NUM_CTX` in `.env` overrides all profiles at runtime.
 
 ### Adding a new tool
 
@@ -315,144 +246,6 @@ Add one entry to `REGISTRY` in `core/models.py`:
 3. Register in `Agent.tools_map` in `core/agent.py`
 4. Add the schema in `Agent.tool_schemas()`
 
-## Agent config (`agents/<name>/config.json`)
-
-Each agent directory contains a `config.json`. All fields:
-
-| 欄位 | 必填 | 說明 |
-|------|------|------|
-| `name` | ✓ | Agent 名稱（目錄名） |
-| `nickname` | | 顯示暱稱（tab 標題、header） |
-| `model` | ✓ | 使用的模型（需在 REGISTRY 內） |
-| `system_prompt` | ✓ | System prompt 全文；支援模板變數（見下方） |
-| `description` | | 一行說明，`/list-agents` 顯示 |
-| `greeting` | | 全新對話時 AI 主動說第一句話的 prompt |
-| `history_keep` | | 記住幾個來回（pair）；預設用 env `HISTORY_KEEP=10` |
-| `mcp_servers` | | 設為 `{}` 則此 agent 不使用 MCP；省略或非空則共用 main agent 的 MCP client（尚未支援 agent 專屬 server） |
-| `tts` | | TTS 設定（見下表）；省略則不啟用語音 |
-
-### `system_prompt` 模板變數
-
-`_resolve_prompt()` in `Agent` expands these before the prompt is sent:
-
-| 變數 | 展開為 |
-|------|--------|
-| `{AGENT_DIR}` | agent 目錄的絕對路徑 |
-| `{CWD}` | 目前工作目錄 |
-| `{DATE}` | 今天日期 `YYYY-MM-DD` |
-| `{{include:filename}}` | 載入 `<agent_dir>/filename` 的文字內容 |
-
-展開時機：`/load-agent`、`/list-agents` 選擇、`/reload-agent`、`/cd`。
-
-```json
-{
-  "system_prompt": "你的工作目錄是 {AGENT_DIR}。\n\n以下是 API 文件：\n{{include:api_docs.md}}"
-}
-```
-
-### `tts` 欄位
-
-| 欄位 | 預設 | 說明 |
-|------|------|------|
-| `engine` | `"edge-tts"` | `"edge-tts"` / `"melotts"` / `"kokoro-api"` / `"kokoro"` / `"azure-tts"` |
-| `voice` | 依 engine | 見下方 voice 表 |
-| `lang` | `"en-us"` | 見下方 lang 表 |
-| `player` | `"auto"` | `"auto"` / `"mpg123"` / `"paplay"` / `"ffplay"` / `"mpv"` |
-| `host` | `"localhost"` | Docker server 位址（melotts / kokoro-api 用） |
-| `port` | 8886 | melotts=8886，kokoro-api=8885 |
-| `speed` | `1.0` | 語速倍率 |
-| `key` | `""` | Azure TTS subscription key（azure-tts 用） |
-| `region` | `""` | Azure region，例如 `"eastasia"`（azure-tts 用） |
-| `endpoint` | `""` | 自訂 Azure endpoint（覆蓋 region 推斷，azure-tts 用） |
-
-**voice / lang 對照表：**
-
-| engine | voice 範例 | lang |
-|--------|-----------|------|
-| `edge-tts` | `"en-US-AriaNeural"` `"zh-TW-HsiaoChenNeural"` | 不需填 |
-| `melotts` | `"EN-US"` `"EN-BR"` `"EN-AU"` `"ZH"` | `"en"` `"zh"` `"fr"` `"jp"` |
-| `kokoro-api` | `"af_bella"` `"af_sky"` `"am_adam"` | `"en-us"` |
-| `kokoro` | `"af_sky"` `"af_bella"` | `"en-us"` `"en-gb"` |
-| `azure-tts` | `"zh-TW-HsiaoChenNeural"` `"en-US-AriaNeural"` | 不需填 |
-
-**`player` 自動選擇邏輯（`"auto"`）：**
-
-| 格式 | 優先順序 |
-|------|---------|
-| MP3（edge-tts） | `mpg123` → `mpv` → `ffplay` → `mplayer` |
-| WAV/OGG（kokoro / melotts） | `paplay` → `mpg123` → `mpv` → `ffplay` |
-
-**WSL2 安裝建議（`player: "auto"` 前提）：**
-
-```bash
-sudo apt install mpg123 pulseaudio-utils   # mpg123=MP3, paplay=WAV
-```
-
-WSLg（Windows 11 21H2+）必須啟用，`$PULSE_SERVER` 才會有值。勿用 `"player": "powershell"`，會造成打字輸入卡頓。
-
-### Agent system prompt 更新
-
-`_load_history()` always strips `role: system` from `history.json` — the system message is always rebuilt from `_custom_system_prompt` (set from `config.json`) plus dynamic content (date, cwd, MCP context). Editing `history.json`'s system message has no effect.
-
-To update a running agent's system prompt: edit `agents/<name>/config.json` → run `/reload-agent`. The agent's `_custom_system_prompt` is updated and `_rebuild_system_prompt()` is called in-place; conversation history is preserved.
-
-### `history_keep` 語義
-
-`history_keep = N` 代表「記住最近 N 個 user/assistant 來回（pair）」：
-- 每次送給 AI：最後 N pair（= N×2 則訊息）
-- 存入 history.json：同樣 N pair
-- 全域預設：env `HISTORY_KEEP=10`（10 pair）
-
-## MCP configuration
-
-Two config files control MCP servers (subagents share the main agent's MCP client):
-
-| File | Scope | Purpose |
-|------|-------|---------|
-| `~/.kai/mcp_servers.json` | global (user home) | MCP servers available to all agents across all projects |
-| `cwd/.kai/mcp_servers.json` | project-local | project-specific MCP servers; merged with global |
-
-Disabled servers use a `_` prefix in `mcp_servers.json` (e.g. `_playwright`, `_filesystem`). The `_` prefix convention prevents accidental activation — remove it to enable.
-
-## Environment variables (`.env`)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL` | `qwen3-vl:4b` | Active model |
-| `CREATE_AGENT_MODEL` | `""` | Model used for `/create-agent` design step (empty = same as MODEL) |
-| `COMPACT_MODEL` | `""` | Model used for `/compact` history compression (empty = auto-select) |
-| `DEBUG_TOOLS` | `0` | Set `1` to enable tool debug cards in UI + append to `tool_calls.log` |
-| `NUM_CTX` | `0` | Context window override (0 = model default) |
-| `MAX_TOOL_CALLS` | `15` | Max tool calls per turn |
-| `TEMPERATURE` | `0.6` | Generation temperature |
-| `TOP_K` | `20` | Top-k sampling (0 = disable) |
-| `TOP_P` | `0.95` | Nucleus sampling |
-| `USERNAME` | `你` | Display name in chat bubbles and prompt title |
-| `HISTORY_KEEP` | `10` | Default history pairs to keep (agent config overrides per-agent) |
-| `BASH_TIMEOUT` | `30` | `bash_exec` default timeout (seconds) |
-| `OLLAMA_STREAM_TIMEOUT` | `120` | Seconds before Ollama stream declared stuck |
-| `SEARXNG_URL` | `http://localhost:8888/search` | SearXNG API endpoint |
-| `SEARCH_NUM_RESULTS` | `5` | Number of search results to return |
-| `MAX_SEARCH_CHARS` | `8000` | Max characters per search result |
-| `FETCH_MAX_CHARS` | `12000` | Max characters returned by `fetch_url` |
-| `GEMINI_API_KEY` | — | Google Gemini API key |
-| `DEEPSEEK_API_KEY` | — | DeepSeek API key |
-| `CONTEXT7_API_KEY` | — | Context7 MCP API key |
-| `AZURE_TTS_KEY` | `""` | Azure TTS subscription key |
-| `AZURE_TTS_REGION` | `""` | Azure region，例如 `eastasia` |
-| `AZURE_TTS_ENDPOINT` | `""` | 自訂 Azure TTS endpoint（覆蓋 region 推斷） |
-| `DIFY_API_URL` | `"http://localhost"` | Dify server URL |
-| `DIFY_API_KEY` | — | Dify Knowledge Base API key（金鑰，只放 `.env`） |
-| `DIFY_TOP_K` | `5` | Number of chunks returned per RAG query |
-| `DIFY_RERANK_PROVIDER` | `"xinference"` | Rerank model provider name in Dify |
-| `DIFY_RERANK_MODEL` | `""` | Rerank model name (empty = reranking disabled) |
-
-Config priority (highest → lowest): `cwd/.kai/config.json` > `~/.kai/config.json` > `.env` > code defaults. Use `/init-config` to export current values and `/reload-config` to hot-apply changes. Only put API keys in `.env`; all other tuning belongs in `.kai/config.json`. Change hardcoded defaults in `core/config.py`; per-model context windows in `core/models.py`.
-
-## SearXNG
-
-Runs in Docker on port 8888 with a Valkey sidecar for rate-limiting. Config is `searxng/settings.yml` (mounted read-only). `formats: [html, json]` must remain enabled for the JSON API used by `web_search`. `limiter: false` is intentional — this is a local private instance.
-
 ## Conventions
 
 See `CONVENTIONS.md` for the full style guide. Key points:
@@ -460,17 +253,6 @@ See `CONVENTIONS.md` for the full style guide. Key points:
 - All public functions and methods require type hints including return type.
 - I/O operations are `async def`; blocking calls go through `asyncio.to_thread()`.
 - Pure data structures use `@dataclass`; cross-boundary inputs use `pydantic.BaseModel`.
-
-## Key dependencies
-
-- `textual` — TUI framework (with `[syntax]` extra for tree-sitter highlighting)
-- `textual-autocomplete` — slash command / path autocomplete in prompt
-- `ollama` — native Python client; used directly to access `msg.thinking` and `tool_calls`
-- `openai` — used by `OpenAICompatStream` in `core/backends.py` for Gemini / compatible endpoints
-- `rich` — text rendering in agent internals and widgets
-- `prompt_toolkit` — input history file format (FileHistory)
-- `tenacity` — retry logic in `web_search`
-- `loguru` — structured logging to `agent_tui.log`
 
 ## Agent skills
 
