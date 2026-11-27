@@ -183,10 +183,12 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("my-tools")
 
+
 @mcp.tool()
 def my_tool(query: str) -> str:
     """做某件事並回傳結果。"""
     return f"結果：{query}"
+
 
 if __name__ == "__main__":
     mcp.run()

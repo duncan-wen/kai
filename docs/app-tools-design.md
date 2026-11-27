@@ -14,9 +14,9 @@ kai 有許多 `/指令`（create-agent、load-agent、cd、model…），目前�
 在 `Agent` 上加三個 optional 欄位：
 
 ```python
-self.extra_tools: list[dict] = []       # JSON schema（description 給 AI 讀）
-self.extra_tools_map: dict = {}         # 實作（callback 到 ChatApp 方法）
-self.extra_tools_note: str = ""         # 注入至 system prompt 的使用規則
+self.extra_tools: list[dict] = []  # JSON schema（description 給 AI 讀）
+self.extra_tools_map: dict = {}  # 實作（callback 到 ChatApp 方法）
+self.extra_tools_note: str = ""  # 注入至 system prompt 的使用規則
 ```
 
 `ChatApp.__init__` 呼叫 `_inject_app_tools(self.agent)` 注入 main agent。
