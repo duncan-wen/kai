@@ -63,3 +63,8 @@ dev = [
     "textual-dev>=1.8.0",
     "pytest>=8.0",
 ]
+
+# 編輯器的 Pyright 指向專案 venv，否則每個第三方 import 都報 unresolved
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

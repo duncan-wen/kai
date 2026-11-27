@@ -43,11 +43,12 @@ class BashMixin(_MixinBase):
         prompt = self.query_one("#prompt", HistoryInput)
         await msgs.add_command(cmd)
         my_tab = self.active_tab
-        self.mark_busy(my_tab)
         spinner = PromptSpinner(
             prompt, "執行中…", visible=lambda: self.active_tab == my_tab
-        ).start()
+        )
+        self.mark_busy(my_tab)
         try:
+            spinner.start()
             env = {
                 **os.environ,
                 "CLICOLOR_FORCE": "1",

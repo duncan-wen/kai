@@ -1,0 +1,9 @@
+# core/ 是 UI 無關層：不能 import widgets/ 或 Textual（CLAUDE.md 的分層規則）
+extend = "../pyproject.toml"
+
+[lint]
+extend-select = ["TID251"]
+
+[lint.flake8-tidy-imports.banned-api]
+"widgets".msg = "core/ 不能 import widgets/（UI 層）"
+"textual".msg = "core/ 不能依賴 Textual（UI 框架）"
