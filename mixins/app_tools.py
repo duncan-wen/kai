@@ -91,7 +91,7 @@ class AppToolsMixin(_MixinBase):
                             "type": "object",
                             "description": (
                                 "語音設定。用戶提到「需要語音」「語音朗讀」「TTS」「說話」時填入，否則省略。"
-                                '格式：{"engine": "edge-tts", "voice": "zh-TW-HsiaoChenNeural", "player": "powershell", "speed": 1.0}。'
+                                '格式：{"engine": "edge-tts", "voice": "zh-TW-HsiaoChenNeural", "speed": 1.0}。'
                                 "中文 voice：zh-TW-HsiaoChenNeural（女）/ zh-TW-YunJheNeural（男）；英文：en-US-AriaNeural。"
                             ),
                         },
@@ -514,6 +514,11 @@ class AppToolsMixin(_MixinBase):
         return f"✅ 訊息已傳送給 {target.display_name}"
 
     async def _app_set_tts(self, engine: str) -> str:
+        from core.tts import ENGINES
+
+        engine = engine.strip().lower()
+        if engine != "off" and engine not in ENGINES:
+            return f"❌ 未知引擎：{engine}。可用：{', '.join((*ENGINES, 'off'))}"
         self._do_tts_switch(engine)
         if engine == "off":
             return "✅ TTS 已關閉"

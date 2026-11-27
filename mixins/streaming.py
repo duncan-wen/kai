@@ -140,27 +140,17 @@ class StreamingMixin(_MixinBase):
         tts_cfg = getattr(agent, "tts_config", None)
         if not tts_cfg or not text:
             return
-        from core.tts import cancel_current, get_tts_loop, speak
+        from core.tts import TTSConfig, cancel_current, get_tts_loop, speak
 
+        cfg = TTSConfig.from_dict(tts_cfg)
+        if cfg is None:
+            return
         cancel_current()  # 終止上一段語音（如正在播放）
         # 同時取消排隊中但尚未開始的 future，避免多輪 tool call 造成 TTS 積壓
         prev = getattr(self, "_tts_future", None)
         if prev and not prev.done():
             prev.cancel()
-        engine = tts_cfg.get("engine", "edge-tts")
-        logger.debug(f"tts: schedule engine={engine} chars={len(text)}")
-        tts_kw = dict(
-            voice=tts_cfg.get("voice", "en-US-AriaNeural"),
-            player=tts_cfg.get("player", "auto"),
-            engine=engine,
-            lang=tts_cfg.get("lang", "en-us"),
-            host=tts_cfg.get("host", "localhost"),
-            port=int(tts_cfg.get("port", 8886)),
-            speed=float(tts_cfg.get("speed", 1.0)),
-            key=tts_cfg.get("key", ""),
-            region=tts_cfg.get("region", ""),
-            endpoint=tts_cfg.get("endpoint", ""),
-        )
+        logger.debug(f"tts: schedule engine={cfg.engine} chars={len(text)}")
         self._tts_future = asyncio.run_coroutine_threadsafe(
-            speak(text, **tts_kw), get_tts_loop()
+            speak(text, cfg), get_tts_loop()
         )
