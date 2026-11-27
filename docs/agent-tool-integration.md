@@ -79,18 +79,24 @@ CREATE_GHOST_DRAFT_TOOL = {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "文章標題"},
-                "html":  {"type": "string", "description": "文章 HTML 內容"},
-                "slug":  {"type": "string", "description": "URL slug（英文連字號）"},
-                "tags":  {"type": "array", "items": {"type": "string"}, "description": "tag slug 清單"},
+                "html": {"type": "string", "description": "文章 HTML 內容"},
+                "slug": {"type": "string", "description": "URL slug（英文連字號）"},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "tag slug 清單",
+                },
                 "excerpt": {"type": "string", "description": "文章摘要（可選）"},
             },
-            "required": ["title", "html", "slug", "tags"]
-        }
-    }
+            "required": ["title", "html", "slug", "tags"],
+        },
+    },
 }
 
-async def create_ghost_draft(title: str, html: str, slug: str,
-                              tags: list[str], excerpt: str = "") -> str:
+
+async def create_ghost_draft(
+    title: str, html: str, slug: str, tags: list[str], excerpt: str = ""
+) -> str:
     # 直接呼叫 Ghost Admin API
     ...
 ```
@@ -146,10 +152,12 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("ghost")
 
+
 @mcp.tool()
 async def create_draft(title: str, html: str, slug: str, tags: list[str]) -> str:
     """建立 Ghost 草稿，回傳 post_id 與 URL。"""
     ...
+
 
 if __name__ == "__main__":
     mcp.run()

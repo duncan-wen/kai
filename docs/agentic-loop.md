@@ -28,7 +28,7 @@ while True:
     # 1. 呼叫 LLM（streaming）
     # 2. 收集 tool_calls
     if not tool_calls:
-        break          # 沒有工具要叫 → 結束
+        break  # 沒有工具要叫 → 結束
     # 3. asyncio.gather 並行執行所有工具
     # 4. 把結果 append 進 messages
     # 5. 繼續下一輪

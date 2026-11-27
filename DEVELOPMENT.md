@@ -265,10 +265,11 @@ MCP client 用獨立的 `asyncio.create_task()` 長駐執行：
 # on_mount
 self._mcp_task = asyncio.get_event_loop().create_task(self._mcp_lifecycle())
 
+
 async def _mcp_lifecycle(self):
     await mcp.start()
-    await self._mcp_done.wait()   # 等待退出訊號
-    await mcp.stop()              # start/stop 同一 task
+    await self._mcp_done.wait()  # 等待退出訊號
+    await mcp.stop()  # start/stop 同一 task
 ```
 
 **為什麼不用 `@work`**：anyio cancel scope 必須在同一個 asyncio task 中 enter/exit。若 `start()` 和 `stop()` 在不同 task，會 deadlock 或 `RuntimeError`。`asyncio.create_task()` 保證整個生命週期在同一 task。
@@ -301,6 +302,7 @@ ESC[<35;80;25M  →  Textual 吃掉 ESC[，剩 <35;80;25M 逐字進 Input
 
 ```python
 _MOUSE_SEQ = re.compile(r"(?:\x1b\[?)?<?(?:\d+;)+\d+[Mm]")
+
 
 def on_input_changed(self, event):
     if _MOUSE_SEQ.search(event.value):

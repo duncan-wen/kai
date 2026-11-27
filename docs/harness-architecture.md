@@ -94,9 +94,9 @@ kai 的工具層解決一個核心工程問題：**如何讓 LLM 產生的 JSON 
 ```python
 # core/tools/dispatch.py：三級分發
 
-SEARCH_TOOL     # → web_search(query)      → SearXNG API
-FETCH_URLS_TOOL # → fetch_urls(urls)       → Jina Reader
-BASH_TOOL       # → bash_exec(command)     → subprocess
+SEARCH_TOOL  # → web_search(query)      → SearXNG API
+FETCH_URLS_TOOL  # → fetch_urls(urls)       → Jina Reader
+BASH_TOOL  # → bash_exec(command)     → subprocess
 
 # 分發邏輯（在 agent.py 的 chat() 內）
 results = await asyncio.gather(
@@ -182,32 +182,42 @@ Harness 需要知道「模型能做什麼」才能正確驅動它。
 @dataclass
 class ModelProfile:
     name: str
-    supports_thinking: bool = False   # 有 <think> block
-    supports_vision: bool = False     # 能吃圖片
-    supports_tools: bool = True       # 能輸出 tool_calls
-    num_ctx: int = 4096               # context window
-    backend: str = "ollama"           # ollama / gemini / deepseek
+    supports_thinking: bool = False  # 有 <think> block
+    supports_vision: bool = False  # 能吃圖片
+    supports_tools: bool = True  # 能輸出 tool_calls
+    num_ctx: int = 4096  # context window
+    backend: str = "ollama"  # ollama / gemini / deepseek
 ```
 
 #### 後端 Adapter 策略模式
 
 ```python
 # agent.py __init__：client 在啟動時建立，跨請求重用
-self._gemini = AsyncOpenAI(
-    api_key=GEMINI_API_KEY,
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-) if GEMINI_API_KEY else None
+self._gemini = (
+    AsyncOpenAI(
+        api_key=GEMINI_API_KEY,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    )
+    if GEMINI_API_KEY
+    else None
+)
 
-self._deepseek = AsyncOpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com",
-) if DEEPSEEK_API_KEY else None
+self._deepseek = (
+    AsyncOpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com",
+    )
+    if DEEPSEEK_API_KEY
+    else None
+)
 
 # agent.py chat()：根據 profile 選 client
 if self.profile.backend == "gemini":
     stream = await self._gemini.chat.completions.create(...)
 elif self.profile.backend == "deepseek":
-    stream = await self._deepseek.chat.completions.create(..., extra_body={"thinking": ...})
+    stream = await self._deepseek.chat.completions.create(
+        ..., extra_body={"thinking": ...}
+    )
 else:  # ollama
     stream = await self._ollama.chat(...)
 ```
@@ -251,8 +261,7 @@ Rebuild system prompt（注入日期、cwd、MCP context）
 
 ```python
 results = await asyncio.gather(
-    *[run_tool(tc, self.tools_map, self.mcp_client)
-      for tc in tool_calls]
+    *[run_tool(tc, self.tools_map, self.mcp_client) for tc in tool_calls]
 )
 ```
 
@@ -321,7 +330,11 @@ def _rotate_history(self):
 async def compact_history(self) -> str:
     # COMPACT_MODEL 優先；未設時有 Gemini key 用 gemini-2.5-flash，否則 deepseek-flash
     _compact_client = self._gemini or self._deepseek
-    _compact_model = _cfg.COMPACT_MODEL or (COMPACT_FALLBACK_DEEPSEEK if not self._gemini and self._deepseek else COMPACT_FALLBACK_GEMINI)
+    _compact_model = _cfg.COMPACT_MODEL or (
+        COMPACT_FALLBACK_DEEPSEEK
+        if not self._gemini and self._deepseek
+        else COMPACT_FALLBACK_GEMINI
+    )
     # 把整段 history 送給摘要模型
     # 回傳摘要文字，取代原有 history（只保留 system + 摘要）
 ```
@@ -347,9 +360,9 @@ Harness 要在每次對話前重建 system prompt，因為**環境資訊會變�
 
 ```python
 def _rebuild_system_prompt(self):
-    now = datetime.now().strftime("%Y-%m-%d")   # 日期會變
-    cwd = os.getcwd()                            # 目錄會變
-    mcp_server_desc = ...                        # MCP 連線狀態會變
+    now = datetime.now().strftime("%Y-%m-%d")  # 日期會變
+    cwd = os.getcwd()  # 目錄會變
+    mcp_server_desc = ...  # MCP 連線狀態會變
 
     # 檢查 notes.md（使用者撰寫的 User Harness）
     notes_path = Path(cwd) / ".kai" / "notes.md"
@@ -365,9 +378,14 @@ def _rebuild_system_prompt(self):
                 f"\n\n你已連接以下 MCP server：{mcp_server_desc}。"
                 f"\n\n## 📁 工作目錄\n- 目前工作目錄：{cwd}"
                 + "\n\n## 🛠️ 執行與排錯 SOP"
-                + ("\n- 瀏覽器操作：僅限使用 Playwright MCP ..." if has_playwright else "")
+                + (
+                    "\n- 瀏覽器操作：僅限使用 Playwright MCP ..."
+                    if has_playwright
+                    else ""
+                )
                 # ... 動態根據 MCP 工具組合產生的 SOP
-                if has_mcp else ""
+                if has_mcp
+                else ""
             )
         ),
     }
