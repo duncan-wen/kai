@@ -285,6 +285,23 @@ MCP（Model Context Protocol）工具透過 `mcp_servers.json` 設定。模型�
 1. 在 `core/tools/` 下定義 Ollama 工具 schema（仿照 `SEARCH_TOOL`）。
 2. 實作 `async def my_tool(...) -> str` 函式。
 3. 在 `core/agent.py` 的 `Agent.tools_map` 中登記對應關係。
-4. 將 schema 加入 `chat()` 內的 `active_tools` 清單。
+4. 將 schema 加入 `Agent.tool_schemas()`。
 
 詳見 [CLAUDE.md](../CLAUDE.md) 的「Adding a new tool」章節。
+
+## 快捷鍵
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+Q` | Quit |
+| `Ctrl+P` | Command palette |
+| `Ctrl+T` | Toggle file tree |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+W` | Close active tab (priority binding) |
+| `Escape` | Cancel streaming response / clear tree multi-select |
+| `↑ / ↓` | Navigate input history |
+| `Ctrl+Z` | Undo in input |
+| `Space` (in tree) | Toggle current node in multi-select / range-select from anchor |
+| `Ctrl+A` (in tree) | Select all / deselect all |
+| `Ctrl+S` (FileViewer) | Save file |
+| `F2` (FileViewer) | Save As (Ctrl+Shift+S is indistinguishable from Ctrl+S in most terminals) |
