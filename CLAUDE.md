@@ -160,11 +160,11 @@ State that is drawn on screen lives in `ChatApp` reactives; widgets bind to it i
 | `debug_tools` | `PromptBar.debug_mark` → `HistoryInput.debug_mark` | prompt idle title / spinner debug mark |
 | `think_override` | (`watch_think_override` → `refresh_agent_view`) | thinking on/off |
 | `agent_view: AgentView` | `Sidebar.view`, `CapBar.view`; `ChatApp.watch_agent_view` | sidebar model + MCP, cap-bar think/vision, subtitle, prompt placeholder |
-| `active_tab` / `busy_tabs` → computed `prompt_locked` | `PromptBar.locked` → `HistoryInput.locked` | prompt `disabled` + `.streaming` class; unlock restores idle title + focus |
+| `active_tab` / `busy_jobs` → computed `prompt_locked` | `PromptBar.locked` → `HistoryInput.locked` | prompt `disabled` + `.streaming` class; unlock restores idle title + focus |
 
 `AgentView` (`core/app_state.py`) is a frozen snapshot of the active agent. Agents are mutated in place by core code, so after changing anything it shows (model switch, nickname, tab switch, reload-agent, rename/resume/cd, MCP ready) call `self.refresh_agent_view()` — equal snapshots don't trigger redraws. Don't write to `#sb-model` / `#cap-think` / `sub_title` / prompt `border_title` directly.
 
-Long-running work in a tab (streaming, agent dispatch, greeting, `/create-agent`, `!bash`) wraps itself in `self.mark_busy(tab_id)` … `finally: self.unmark_busy(tab_id)` and gives its `PromptSpinner` `visible=lambda: self.active_tab == tab_id`. Never set `prompt.disabled` or the `streaming` class by hand; tab switches lock/unlock automatically. `busy_tabs` is a multiset (tuple), so overlapping jobs on one tab unlock only when all finish.
+Long-running work in a tab (streaming, agent dispatch, greeting, `/create-agent`, `!bash`) wraps itself in `self.mark_busy(tab_id)` … `finally: self.unmark_busy(tab_id)` and gives its `PromptSpinner` `visible=lambda: self.active_tab == tab_id`. Never set `prompt.disabled` or the `streaming` class by hand; tab switches lock/unlock automatically. `busy_jobs` holds one `(tab_id, cancel)` entry per job (a multiset), so overlapping jobs on one tab unlock only when all finish.
 
 ### `!` bash commands
 
@@ -265,7 +265,7 @@ When pasting multiline text into the prompt:
 
 1. Takes `agent.turn_lock` and `agent.turn_scope()` (a mid-turn `switch_model` applies after the turn); `agent.prepare_turn()` rebuilds the system prompt
 2. Each step calls `agent.model_stream.step(...)`; tool calls run concurrently, results go back as `tool` messages
-3. Events go to `sink`: `ThinkingDone`, `Token` (text already stripped of `<next>`), `StepReset`, `ToolEvent`, `Compacting` / `Compacted`, then exactly one `Done(reason, reply, stats, prediction, error, new_messages)`
+3. Events go to `sink`: `ThinkingStarted` / `ThinkingDone`, `Token` (text already stripped of `<next>`), `StepReset`, `ToolEvent`, `Compacting` / `Compacted`, then exactly one `Done(reason, reply, stats, prediction, error, new_messages)`; a reply that is empty after stripping `<next>` ends as `empty` and is not committed
 4. History is committed once at the end (`persist`: `all` / `reply_only` / `none`); errors and cancels leave it untouched
 5. Model/backend errors never raise — they become `Done(reason="error", error=TurnError(kind))`, kind `overflow` / `timeout` / `quota` / `other`; overflow triggers one compact + retry of the same message, continuing from the tool steps already done (tools are not re-run). An empty reply whose prompt hit `num_ctx` (Ollama truncates silently instead of erroring) also ends as `overflow`, without compacting
 6. Bad tool-argument JSON is returned to the model as an error `ToolResult`; `MAX_TOOL_CALLS` ends with `Done(tool_limit)`

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual.containers import Vertical, VerticalScroll
+from textual.widget import Widget
 from textual.widgets import Collapsible, Markdown, Static
 
 import core.config as _cfg
@@ -22,10 +23,13 @@ from core.turn import (
     Done,
     StepReset,
     ThinkingDone,
+    ThinkingStarted,
     Token,
     ToolEvent,
     TurnEvent,
     TurnStats,
+    inbox_sender,
+    user_text,
 )
 
 from .chat import AIMessage, ImageBubble
@@ -68,13 +72,6 @@ def error_text(done: Done) -> str:
     return _ERROR_PREFIX[done.error.kind] + done.error.message
 
 
-def _user_text(content: str | list) -> str:
-    """history 裡 user content 可能是多模態 list，只取文字部分。"""
-    if isinstance(content, list):
-        return next((p.get("text", "") for p in content if p.get("type") == "text"), "")
-    return content
-
-
 def _preview(text: str, cap: int) -> str:
     return text[:cap] + ("…" if len(text) > cap else "")
 
@@ -87,7 +84,7 @@ class ChatLog(VerticalScroll):
     def at_bottom(self) -> bool:
         return self.scroll_y >= self.max_scroll_y - 3
 
-    async def _append(self, *widgets, follow: bool | None = None) -> None:
+    async def append(self, *widgets: Widget, follow: bool | None = None) -> None:
         """mount 到最後；`follow=None` 表示貼底才捲，True 一律捲到底。"""
         stick = self.at_bottom() if follow is None else follow
         await self.mount(*widgets)
@@ -95,6 +92,10 @@ class ChatLog(VerticalScroll):
             self.scroll_end(animate=False)
 
     # ── 非 turn 的訊息 ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def ai_header(name: str) -> Static:
+        return Static(f"🤖 {name}", classes="ai-header", markup=False)
 
     def _user_bubble(self, text: str) -> Static:
         body = Text.assemble((_cfg.USERNAME, "bold"), "\n", text)
@@ -109,32 +110,32 @@ class ChatLog(VerticalScroll):
         )
 
     async def add_user(self, text: str) -> None:
-        await self._append(self._user_bubble(text), follow=True)
+        await self.append(self._user_bubble(text), follow=True)
 
     async def add_command(self, cmd: str) -> None:
         """`!bash` 指令泡泡。"""
         body = Text.assemble(("$", "bold"), " ", cmd)
-        await self._append(
+        await self.append(
             Static(body, markup=False, classes="user-bubble"), follow=True
         )
 
     async def add_image(self, path: str, question: str) -> None:
-        await self._append(ImageBubble(path, question), follow=True)
+        await self.append(ImageBubble(path, question), follow=True)
 
     async def add_inbox(self, sender: str, text: str) -> None:
-        await self._append(self._inbox_bubble(sender, text), follow=True)
+        await self.append(self._inbox_bubble(sender, text), follow=True)
 
     async def add_output(self, text: str | Text = "") -> Static:
         """指令輸出區塊（`!bash`、/create-agent）；回傳 widget 供之後 `update`。"""
         out = Static(text, markup=False, classes="bash-output")
-        await self._append(out, follow=True)
+        await self.append(out, follow=True)
         return out
 
     async def add_notice(self, text: str) -> None:
-        await self._append(Static(text, markup=False, classes="notice"), follow=True)
+        await self.append(Static(text, markup=False, classes="notice"), follow=True)
 
     async def add_error(self, text: str) -> None:
-        await self._append(Static(text, markup=False, classes="error-msg"), follow=True)
+        await self.append(Static(text, markup=False, classes="error-msg"), follow=True)
 
     async def render_history(self, agent: "Agent", *, clear: bool = True) -> None:
         """把 agent.history 畫出來；`clear=False` 時接在既有內容後面（例如歡迎訊息）。"""
@@ -146,21 +147,17 @@ class ChatLog(VerticalScroll):
             role = msg.get("role")
             content = msg.get("content") or ""
             if role == "user":
-                text = _user_text(content)
+                text = user_text(msg)
                 if not text:
                     continue
-                sender = msg.get("_inbox_sender")
+                sender = inbox_sender(msg)
                 widgets.append(
                     self._inbox_bubble(sender, text)
                     if sender
                     else self._user_bubble(text)
                 )
             elif role == "assistant" and content:
-                widgets.append(
-                    Static(
-                        f"🤖 {agent.display_name}", classes="ai-header", markup=False
-                    )
-                )
+                widgets.append(self.ai_header(agent.display_name))
                 ai_msg = AIMessage()
                 widgets.append(ai_msg)
                 ai_updates.append((ai_msg, content))
@@ -205,27 +202,31 @@ class ReplySink:
         self._last_render = 0.0
 
     async def __call__(self, ev: TurnEvent) -> None:
-        if isinstance(ev, ThinkingDone):
-            self._on_phase("思考中")
-            await self._thinking(ev.text)
-        elif isinstance(ev, Token):
-            self._on_phase("生成中")
-            await self._token(ev.text)
-        elif isinstance(ev, StepReset):
-            if self._bubble is not None:
-                await self._bubble.update_content("")
-        elif isinstance(ev, ToolEvent):
-            self._on_phase("工具回應中")
-            await self._finalize(self._text)
-            await self._tool(ev)
-        elif isinstance(ev, Compacting):
-            self._on_phase("壓縮中")
-            await self._finalize(self._text)
-            await self._log.add_notice("⚡ Context 已滿，正在壓縮對話歷史…")
-        elif isinstance(ev, Compacted):
-            await self._log.add_notice("✅ 已壓縮，繼續對話")
-        elif isinstance(ev, Done):
-            await self._done(ev)
+        match ev:
+            case ThinkingStarted():
+                self._on_phase("思考中")
+            case ThinkingDone():
+                await self._thinking(ev.text)
+            case Token():
+                self._on_phase("生成中")
+                await self._token(ev.text)
+            case StepReset():
+                # 後端重試本 step：已顯示的文字作廢
+                self._text = ""
+                if self._bubble is not None:
+                    await self._bubble.update_content("")
+            case ToolEvent():
+                self._on_phase("工具回應中")
+                await self._finalize(self._text)
+                await self._tool(ev)
+            case Compacting():
+                self._on_phase("壓縮中")
+                await self._finalize(self._text)
+                await self._log.add_notice("⚡ Context 已滿，正在壓縮對話歷史…")
+            case Compacted():
+                await self._log.add_notice("✅ 已壓縮，繼續對話")
+            case Done():
+                await self._done(ev)
 
     async def _finalize(self, content: str) -> None:
         """把目前串流中的泡泡定稿成 Markdown。"""
@@ -235,7 +236,7 @@ class ReplySink:
         self._text = ""
 
     async def _thinking(self, text: str) -> None:
-        await self._log._append(
+        await self._log.append(
             Collapsible(
                 Static(_preview(text, 2000), markup=False),
                 title="💡 思考過程",
@@ -248,11 +249,8 @@ class ReplySink:
         self._text = text
         if self._bubble is None:
             self._bubble = AIMessage()
-            await self._log._append(
-                Static(
-                    f"🤖 {self._agent.display_name}", classes="ai-header", markup=False
-                ),
-                self._bubble,
+            await self._log.append(
+                ChatLog.ai_header(self._agent.display_name), self._bubble
             )
         now = time.monotonic()
         if now - self._last_render >= self._RENDER_INTERVAL:
@@ -271,7 +269,7 @@ class ReplySink:
             # 非 debug 模式只顯示錯誤卡片
             if tr.is_error:
                 args = _preview(json.dumps(ev.args, ensure_ascii=False), 300)
-                await self._log._append(
+                await self._log.append(
                     Collapsible(
                         Static(f"參數：{args}\n\n{tr.output[:600]}", markup=False),
                         title=f"{icon} {ev.name}  [dim]工具錯誤[/dim]",
@@ -285,7 +283,7 @@ class ReplySink:
         result = tr.output[:cap] + (
             f"\n…（共 {len(tr.output)} 字元）" if len(tr.output) > cap else ""
         )
-        await self._log._append(
+        await self._log.append(
             Collapsible(
                 Vertical(
                     Markdown(f"**參數**\n```json\n{args}\n```"),
@@ -299,19 +297,22 @@ class ReplySink:
 
     async def _done(self, ev: Done) -> None:
         await self._finalize(ev.reply if ev.reason == "complete" else self._text)
-        if ev.reason == "empty":
-            await self._log._append(
-                Static(
-                    "🤖 [dim]（已完成，無文字回覆）[/dim]",
-                    markup=True,
-                    classes="ai-header",
+        match ev.reason:
+            case "error":
+                await self._log.add_error(error_text(ev))
+                return
+            case "cancelled":
+                return
+            case "empty":
+                await self._log.append(
+                    Static(
+                        "🤖 [dim]（已完成，無文字回覆）[/dim]",
+                        markup=True,
+                        classes="ai-header",
+                    )
                 )
-            )
-        elif ev.reason == "tool_limit":
-            await self._log.add_notice(ev.reply)
-        elif ev.reason == "error":
-            await self._log.add_error(error_text(ev))
-        if ev.reason in ("complete", "empty", "tool_limit"):
-            await self._log._append(
-                Static(format_stats(ev.stats), classes="stats", markup=False)
-            )
+            case "tool_limit":
+                await self._log.add_notice(ev.reply)
+        await self._log.append(
+            Static(format_stats(ev.stats), classes="stats", markup=False)
+        )

@@ -106,7 +106,7 @@ if NUM_CTX:
                        ▼
 ┌─────────────────────────────────────────────────────┐
 │  adapter 逐 chunk 送 Delta，turn 轉成事件給 sink    │
-│  thinking  → ThinkingDone → TUI 顯示思考框          │
+│  thinking  → ThinkingStarted / ThinkingDone → 思考框│
 │  text      → Token        → TUI 逐字渲染            │
 │  tool_calls→ AssistantStep.tool_calls               │
 └──────────────────────┬──────────────────────────────┘

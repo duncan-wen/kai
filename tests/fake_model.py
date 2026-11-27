@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Awaitable, Callable
 
 from core.model_stream import AssistantStep, CancelToken, Delta, ToolCall, Usage
 
@@ -62,7 +62,15 @@ class FakeModel:
         self.keeps_reasoning = keeps_reasoning
         self.calls: list[Call] = []
 
-    async def step(self, messages, tools, *, think, on_delta, cancel: CancelToken):
+    async def step(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        think: bool,
+        on_delta: Callable[[Delta], Awaitable[None]],
+        cancel: CancelToken,
+    ) -> AssistantStep:
         self.calls.append(Call([dict(m) for m in messages], list(tools), think))
         item = self.script.pop(0)
         if isinstance(item, BaseException):
