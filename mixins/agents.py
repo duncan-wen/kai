@@ -36,14 +36,15 @@ class AgentsMixin(_MixinBase):
         prompt = self.query_one("#prompt", HistoryInput)
         my_tab = self.active_tab
         design_model = _cfg.CREATE_AGENT_MODEL or _cfg.MODEL
-        self.mark_busy(my_tab)
         spinner = PromptSpinner(
             prompt,
             f"設計 agent 中（{design_model}）…",
             visible=lambda: self.active_tab == my_tab,
-        ).start()
-        await msgs.add_output(f"🏭 設計中：{description}")
+        )
+        self.mark_busy(my_tab)
         try:
+            spinner.start()
+            await msgs.add_output(f"🏭 設計中：{description}")
             data = await call_full_design(description)
             missing = validate_agent(data)
             if missing:
