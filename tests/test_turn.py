@@ -335,6 +335,34 @@ def test_overflow_without_compact_backend(make_agent):
     assert "壓縮後仍失敗" not in done.error.message
 
 
+def test_saturated_context_with_empty_reply_is_overflow(make_agent):
+    async def ls() -> str:
+        return "很長的結果"
+
+    agent = make_agent(
+        [
+            tool_step(("ls", {})),
+            reply(gen_tokens=1, prompt_tokens=16383, num_ctx=16384),
+        ]
+    )
+    agent.tools_map["ls"] = ls
+    log: list = []
+    _fake_compact(agent, log)
+    done, _ = run(agent, TurnRequest(user()))
+
+    assert done.reason == "error"
+    assert done.error.kind == "overflow"
+    assert "16383/16384" in done.error.message
+    assert log == []  # 不 autocompact
+    assert non_system(agent) == []
+
+
+def test_empty_reply_below_context_limit_stays_empty(make_agent):
+    agent = make_agent([reply(prompt_tokens=9000, num_ctx=16384)])
+    done, _ = run(agent, TurnRequest(user()))
+    assert done.reason == "empty"
+
+
 def test_model_errors_become_done(make_agent):
     from core.model_stream import QuotaError
 
